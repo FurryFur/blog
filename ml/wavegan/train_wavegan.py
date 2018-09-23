@@ -2,6 +2,7 @@ from __future__ import print_function
 import pickle
 import os
 import time
+import re
 
 import numpy as np
 import tensorflow as tf
@@ -87,11 +88,27 @@ def train(fps, args):
   print('Total params: {} ({:.2f} MB)'.format(nparams, (float(nparams) * 4) / (1024 * 1024)))
   print('-' * 80)
 
+  # Summarize
+  D_v_global = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='D')
+  G_v_global = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='G')
+  for v in D_v_global:
+    if re.search(r'gmau/.+_gate:0', v.name):
+      tf.summary.scalar(v.name, tf.reduce_mean(tf.abs(v)))
+  for v in G_v_global:
+    if re.search(r'gmau/.+_gate:0', v.name):
+      tf.summary.scalar(v.name, tf.reduce_mean(tf.abs(v)))
+
   # Make fake discriminator
   with tf.name_scope('D_G_z'), tf.variable_scope('D', reuse=True):
     D_G_z = WaveGANDiscriminator(G_z, **args.wavegan_d_kwargs)
 
   # Create loss
+  # Get gmau weights to regularize
+  regularizer = tf.contrib.layers.l1_regularizer(scale=0.00)
+  G_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='G')
+  D_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='D')
+  G_reg_loss = 0 #tf.contrib.layers.apply_regularization(regularizer, G_reg_vars)
+  D_reg_loss = 0 #tf.contrib.layers.apply_regularization(regularizer, D_reg_vars)
   D_clip_weights = None
   if args.wavegan_loss == 'dcgan':
     fake = tf.zeros([args.train_batch_size], dtype=tf.float32)
@@ -102,6 +119,7 @@ def train(fps, args):
       labels=real
     ))
     G_loss += c_kl_loss
+    G_loss += G_reg_loss
 
     D_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
       logits=D_G_z,
@@ -111,18 +129,24 @@ def train(fps, args):
       logits=D_x,
       labels=real
     ))
-
     D_loss /= 2.
+    D_loss += D_reg_loss
   elif args.wavegan_loss == 'lsgan':
     G_loss = tf.reduce_mean((D_G_z - 1.) ** 2)
     G_loss += c_kl_loss
+    G_loss += G_reg_loss
+
     D_loss = tf.reduce_mean((D_x - 1.) ** 2)
     D_loss += tf.reduce_mean(D_G_z ** 2)
     D_loss /= 2.
+    D_loss += D_reg_loss
   elif args.wavegan_loss == 'wgan':
     G_loss = -tf.reduce_mean(D_G_z)
     G_loss += c_kl_loss
+    G_loss += G_reg_loss
+
     D_loss = tf.reduce_mean(D_G_z) - tf.reduce_mean(D_x)
+    D_loss += D_reg_loss
 
     with tf.name_scope('D_clip_weights'):
       clip_ops = []
@@ -138,7 +162,10 @@ def train(fps, args):
   elif args.wavegan_loss == 'wgan-gp':
     G_loss = -tf.reduce_mean(D_G_z)
     G_loss += c_kl_loss
+    G_loss += G_reg_loss
+
     D_loss = tf.reduce_mean(D_G_z) - tf.reduce_mean(D_x)
+    D_loss += D_reg_loss
 
     alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
     differences = G_z - x
