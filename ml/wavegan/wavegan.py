@@ -50,13 +50,36 @@ def gmau(inputs):
   Gated Multi-Activation Unit
   """
   with tf.variable_scope('gmau'):
-    regularizer = tf.contrib.layers.l1_regularizer(scale=0.00)
+    #regularizer = tf.contrib.layers.l1_regularizer(scale=0.00)
     #linear_gate = tf.get_variable('linear_gate', [inputs.shape[-1]], regularizer=regularizer)
-    tanh_gate = tf.get_variable('tanh_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
+    #tanh_gate = tf.get_variable('tanh_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
     #relu_gate = tf.get_variable('relu_gate', [inputs.shape[-1]], regularizer=regularizer)
-    lrelu_gate = tf.get_variable('lrelu_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
+    #lrelu_gate = tf.get_variable('lrelu_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
     #elu_gate = tf.get_variable('elu_gate', [inputs.shape[-1]], regularizer=regularizer)
-    sin_gate = tf.get_variable('sin_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
+    #sin_gate = tf.get_variable('sin_gate', [inputs.shape[-1]], regularizer=regularizer, initializer=tf.truncated_normal_initializer(0.33, 0.1))
+
+    # Gate linear ops
+    if inputs.get_shape().ndims == 3:
+      tanh_gate = tf.layers.conv1d(inputs, 32, 1, padding="SAME")
+      tanh_gate = tf.layers.conv1d(tanh_gate, 32, 6, padding="SAME")
+      tanh_gate = tf.layers.conv1d(tanh_gate, inputs.shape[-1], 1, padding="SAME")
+
+      lrelu_gate = tf.layers.conv1d(inputs, 32, 1, padding="SAME")
+      lrelu_gate = tf.layers.conv1d(lrelu_gate, 32, 6, padding="SAME")
+      lrelu_gate = tf.layers.conv1d(lrelu_gate, inputs.shape[-1], 1, padding="SAME")
+
+      sin_gate = tf.layers.conv1d(inputs, 32, 1, padding="SAME")
+      sin_gate = tf.layers.conv1d(sin_gate, 32, 6, padding="SAME")
+      sin_gate = tf.layers.conv1d(sin_gate, inputs.shape[-1], 1, padding="SAME")
+    else:
+      tanh_gate = tf.layers.dense(inputs, inputs.shape[-1])
+      lrelu_gate = tf.layers.dense(inputs, inputs.shape[-1])
+      sin_gate = tf.layers.dense(inputs, inputs.shape[-1])
+
+    # Gate non-linear ops
+    tanh_gate = tf.sigmoid(tanh_gate)
+    lrelu_gate = tf.sigmoid(lrelu_gate)
+    sin_gate = tf.sigmoid(sin_gate)
 
     # Apply gated activation functions
     #linear_out = linear_gate * inputs

@@ -104,9 +104,9 @@ def train(fps, args):
 
   # Create loss
   # Get gmau weights to regularize
-  regularizer = tf.contrib.layers.l1_regularizer(scale=0.00)
-  G_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='G')
-  D_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='D')
+  #regularizer = tf.contrib.layers.l1_regularizer(scale=0.00)
+  #G_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='G')
+  #D_reg_vars = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES, scope='D')
   G_reg_loss = 0 #tf.contrib.layers.apply_regularization(regularizer, G_reg_vars)
   D_reg_loss = 0 #tf.contrib.layers.apply_regularization(regularizer, D_reg_vars)
   D_clip_weights = None
