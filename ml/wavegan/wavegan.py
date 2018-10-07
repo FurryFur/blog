@@ -43,7 +43,7 @@ def custom_conv1d(
 def residual_unit(    
     inputs,
     filters,
-    kernel_width=25,
+    kernel_width=24,
     stride=1,
     padding='same',
     upsample=None,
@@ -181,6 +181,21 @@ def sample_context_embeddings(embedding, embed_size, train=False):
   return c, TRAIN_COEFF_KL * kl_loss
 
 
+def minibatch_stddev_layer(x, group_size=4):
+  with tf.variable_scope('MinibatchStddev'):
+    group_size = tf.minimum(group_size, tf.shape(x)[0])     # Minibatch must be divisible by (or smaller than) group_size.
+    s = x.shape                                             # [NWC]  Input shape.
+    y = tf.reshape(x, [group_size, -1, s[1], s[2]])         # [GMWC] Split minibatch into G groups of size M.
+    y = tf.cast(y, tf.float32)                              # [GMWC] Cast to FP32.
+    y -= tf.reduce_mean(y, axis=0, keepdims=True)           # [GMWC] Subtract mean over group.
+    y = tf.reduce_mean(tf.square(y), axis=0)                # [MWC]  Calc variance over group.
+    y = tf.sqrt(y + 1e-8)                                   # [MWC]  Calc stddev over group.
+    y = tf.reduce_mean(y, axis=[1,2], keepdims=True)        # [M11]  Take average over fmaps and samples.
+    y = tf.cast(y, x.dtype)                                 # [M11]  Cast back to original data type.
+    y = tf.tile(y, [group_size, s[1], 1])                   # [NW1]  Replicate over group and samples.
+    return tf.concat([x, y], axis=2)                        # [NWC]  Append as new fmap.
+
+
 """
   Input: [None, 100]
   Output: [None, 16384, 1], kl_loss for regularizing context embedding sample distribution
@@ -193,7 +208,7 @@ def WaveGANGenerator(
     upsample='zeros',
     train=False,
     context_embedding=None,
-    embedding_dim=128):
+    embedding_dim=256):
   batch_size = tf.shape(z)[0]
 
   if use_batchnorm:
@@ -209,66 +224,54 @@ def WaveGANGenerator(
     output = z
 
   # FC and reshape for convolution
-  # [100 + context_embedding size] -> [16, 1024]
+  # [512] -> [16, 512]
   with tf.variable_scope('z_project'):
-    output = tf.layers.dense(output, 4 * 4 * dim * 2)
-    output = tf.reshape(output, [batch_size, 16, dim * 2])
+    output = tf.layers.dense(output, 16 * 512)
+    output = tf.reshape(output, [batch_size, 16, 512])
     output = batchnorm(output)
-  output = tf.nn.relu(output)
+    output = tf.nn.relu(output)
 
-  # Dense 0
-  # [16, 128] -> [16, 1024]
-  with tf.variable_scope('dense_0'):
-    output = dense_block(output, 7, dim * 2, kernel_len, batchnorm_fn=batchnorm)
+    output = lrelu(batchnorm(custom_conv1d(output, 512, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 512, kernel_len, 1)))
 
   # Layer 0
-  # [16, 1024] -> [64, 256]
+  # [16, 512] -> [64, 256]
   with tf.variable_scope('upconv_0'):
-    output = residual_unit(output, dim * 4, kernel_len, 4, upsample=upsample)
-    output = batchnorm(output)
-  #output = tf.nn.relu(output)
-
-  # Dense 1
-  # [64, 256] -> [64, 512]
-  with tf.variable_scope('dense_1'):
-    output = dense_block(output, 4, dim, kernel_len, batchnorm_fn=batchnorm)
+    output = lrelu(batchnorm(custom_conv1d(output, 512, kernel_len, 4, upsample=upsample)))
+    output = lrelu(batchnorm(custom_conv1d(output, 256, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 256, kernel_len, 1)))
 
   # Layer 1
-  # [64, 512] -> [256, 64]
+  # [64, 256] -> [256, 128]
   with tf.variable_scope('upconv_1'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
-    output = batchnorm(output)
-  #output = tf.nn.relu(output)
-
-  # Dense 2
-  # [256, 64] -> [256, 256]
-  with tf.variable_scope('dense_2'):
-    output = dense_block(output, 3, dim, kernel_len, batchnorm_fn=batchnorm)
+    output = lrelu(batchnorm(custom_conv1d(output, 256, kernel_len, 4, upsample=upsample)))
+    output = lrelu(batchnorm(custom_conv1d(output, 128, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 128, kernel_len, 1)))
 
   # Layer 2
-  # [256, 256] -> [1024, 64]
+  # [256, 128] -> [1024, 64]
   with tf.variable_scope('upconv_2'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
-    output = batchnorm(output)
-  #output = tf.nn.relu(output)
-
-  # Dense 3
-  # [1024, 64] -> [1024, 128]
-  with tf.variable_scope('dense_3'):
-    output = dense_block(output, 1, dim, kernel_len, batchnorm_fn=batchnorm)
+    output = lrelu(batchnorm(custom_conv1d(output, 128, kernel_len, 4, upsample=upsample)))
+    output = lrelu(batchnorm(custom_conv1d(output, 64, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 64, kernel_len, 1)))
 
   # Layer 3
-  # [1024, 128] -> [4096, 64]
+  # [1024, 64] -> [4096, 32]
   with tf.variable_scope('upconv_3'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
-    output = batchnorm(output)
-  #output = tf.nn.relu(output)
+    output = lrelu(batchnorm(custom_conv1d(output, 64, kernel_len, 4, upsample=upsample)))
+    output = lrelu(batchnorm(custom_conv1d(output, 32, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 32, kernel_len, 1)))
 
   # Layer 4
-  # [4096, 64] -> [16384, 1]
+  # [4096, 32] -> [16384, 16]
   with tf.variable_scope('upconv_4'):
-    output = residual_unit(output, 1, kernel_len, 4, upsample=upsample)
-  #output = tf.nn.tanh(output)
+    output = lrelu(batchnorm(custom_conv1d(output, 32, kernel_len, 4, upsample=upsample)))
+    output = lrelu(batchnorm(custom_conv1d(output, 16, kernel_len, 1)))
+    output = lrelu(batchnorm(custom_conv1d(output, 16, kernel_len, 1)))
+
+  # [16384, 16] - [16384, 1]
+  with tf.variable_scope('output'):
+    output = tf.tanh(batchnorm(custom_conv1d(output, 1, 1, 1)))
 
   # Automatically update batchnorm moving averages every time G is used during training
   if train and use_batchnorm:
@@ -307,7 +310,7 @@ def WaveGANDiscriminator(
     use_batchnorm=False,
     phaseshuffle_rad=0,
     context_embedding=None,
-    embedding_dim=128,
+    embedding_dim=256,
     use_extra_uncond_output=False):
   batch_size = tf.shape(x)[0]
 
@@ -325,40 +328,46 @@ def WaveGANDiscriminator(
   # [16384, 1] -> [4096, 64]
   output = x
   with tf.variable_scope('downconv_0'):
-    output = tf.layers.conv1d(output, dim, kernel_len, 4, padding='SAME')
-  output = lrelu(output)
-  output = phaseshuffle(output)
+    output = phaseshuffle(lrelu(tf.layers.conv1d(output, 16, kernel_len, 1, padding='SAME')))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 32, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 32, kernel_len, 4, padding='SAME'))))
 
   # Layer 1
   # [4096, 64] -> [1024, 128]
   with tf.variable_scope('downconv_1'):
-    output = tf.layers.conv1d(output, dim * 2, kernel_len, 4, padding='SAME')
-    output = batchnorm(output)
-  output = lrelu(output)
-  output = phaseshuffle(output)
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 32, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 64, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 64, kernel_len, 4, padding='SAME'))))
 
   # Layer 2
   # [1024, 128] -> [256, 256]
   with tf.variable_scope('downconv_2'):
-    output = tf.layers.conv1d(output, dim * 4, kernel_len, 4, padding='SAME')
-    output = batchnorm(output)
-  output = lrelu(output)
-  output = phaseshuffle(output)
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 64, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 128, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 128, kernel_len, 4, padding='SAME'))))
 
   # Layer 3
   # [256, 256] -> [64, 512]
   with tf.variable_scope('downconv_3'):
-    output = tf.layers.conv1d(output, dim * 8, kernel_len, 4, padding='SAME')
-    output = batchnorm(output)
-  output = lrelu(output)
-  output = phaseshuffle(output)
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 128, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 256, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 256, kernel_len, 4, padding='SAME'))))
 
   # Layer 4
   # [64, 512] -> [16, 1024]
   with tf.variable_scope('downconv_4'):
-    output = tf.layers.conv1d(output, dim * 16, kernel_len, 4, padding='SAME')
-    output = batchnorm(output)
-  hidden = lrelu(output)
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 256, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 4, padding='SAME'))))
+  
+  # 16 - > 4
+  with tf.variable_scope('downconv_5'):
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 4, padding='SAME'))))
+
+  # Add explicit statistics
+  hidden = minibatch_stddev_layer(output)
 
   if (context_embedding is not None):
     # Reduce size of context embedding
@@ -369,20 +378,19 @@ def WaveGANDiscriminator(
     # Context dims: [128] -> [1, 128]
     c = tf.expand_dims(c, 1)
     # Context dims: [1, 128] -> [16, 128]
-    c = tf.tile(c, [1, 16, 1])
+    c = tf.tile(c, [1, 4, 1])
 
     # Concat context with encoded audio along the channels dimension
     # [16, 1024] -> [16, 1152]
     output = tf.concat([hidden, c], 2)
-
-    # 1x1 Convolution over combined features
-    # [16, 1152] -> [16, 1024]
-    with tf.variable_scope('1_by_1_conv'):
-      output = tf.layers.conv1d(output, dim * 16, kernel_len, 1, padding='SAME')
-      output = batchnorm(output)
-    output = lrelu(output)
   else:
     output = hidden
+  
+  # 4 -> 1
+  with tf.variable_scope('downconv_6'):
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 1, padding='SAME'))))
+    output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(output, 512, kernel_len, 4, padding='SAME'))))
 
   # Flatten
   # [16, 1024] -> [16384]
@@ -409,11 +417,14 @@ def WaveGANDiscriminator(
   output = tf.layers.dense(hidden, 1)[:, 0]
   with tf.variable_scope('output'):
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_output = tf.layers.dense(hidden, 1)[:, 0]
-      return [output, uncond_output]
+        with tf.variable_scope('uncond_block'):
+          uncond_output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(hidden, 512, kernel_len, 1, padding='SAME'))))
+          uncond_output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(uncond_output, 512, kernel_len, 1, padding='SAME'))))
+          uncond_output = phaseshuffle(lrelu(batchnorm(tf.layers.conv1d(uncond_output, 512, kernel_len, 4, padding='SAME'))))
+          uncond_output = tf.layers.dense(tf.reshape(uncond_output, [batch_size, -1]), 1)[:, 0]
+          return [output, uncond_output]
     else:
       return [output]
 
   # Don't need to aggregate batchnorm update ops like we do for the generator because we only use the discriminator for training
 
-  return output
