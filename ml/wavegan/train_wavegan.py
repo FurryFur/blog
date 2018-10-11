@@ -124,8 +124,8 @@ def train(fps, args):
   # Make fake / wrong discriminator
   with tf.name_scope('D_G_z'), tf.variable_scope('D', reuse=True):
     D_G_z = WaveGANDiscriminator(G_z, **args.wavegan_d_kwargs)
-  with tf.name_scope('D_w'), tf.variable_scope('D', reuse=True):
-    D_w = WaveGANDiscriminator(wrong_audio, **args.wavegan_d_kwargs)
+  # with tf.name_scope('D_w'), tf.variable_scope('D', reuse=True):
+  #   D_w = WaveGANDiscriminator(wrong_audio, **args.wavegan_d_kwargs)
 
   # Create loss
   D_clip_weights = None
@@ -153,10 +153,10 @@ def train(fps, args):
       logits=D_G_z[0],
       labels=fake
     ))
-    D_loss_wrong = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-      logits=D_w[0],
-      labels=fake
-    ))
+    # D_loss_wrong = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+    #   logits=D_w[0],
+    #   labels=fake
+    # ))
     D_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
       logits=D_x[0],
       labels=real
@@ -168,20 +168,20 @@ def train(fps, args):
         logits=D_G_z[1],
         labels=fake
       ))
-      D_loss_wrong_uncond = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-        logits=D_w[1],
-        labels=real
-      ))
+      # D_loss_wrong_uncond = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+      #   logits=D_w[1],
+      #   labels=real
+      # ))
       D_loss_real_uncond = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
         logits=D_x[1],
         labels=real
       ))
 
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-             + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond
+      D_loss = D_loss_real + D_loss_fake \
+             + D_loss_real_uncond + D_loss_fake_uncond
       D_loss /= 2
     else:
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
+      D_loss = D_loss_real + D_loss_fake
   elif args.wavegan_loss == 'lsgan':
     # Conditional G Loss
     G_loss = tf.reduce_mean((D_G_z[0] - 1.) ** 2)
@@ -194,20 +194,20 @@ def train(fps, args):
 
     # Conditional D Loss
     D_loss_real = tf.reduce_mean((D_x[0] - 1.) ** 2)
-    D_loss_wrong = tf.reduce_mean(D_w[0] ** 2)
+    # D_loss_wrong = tf.reduce_mean(D_w[0] ** 2)
     D_loss_fake = tf.reduce_mean(D_G_z[0] ** 2)
 
     # Unconditional D Loss
     if args.use_extra_uncond_loss:
       D_loss_real_uncond = tf.reduce_mean((D_x[1] - 1.) ** 2)
-      D_loss_wrong_uncond = tf.reduce_mean((D_w[1] - 1.) ** 2)
+      # D_loss_wrong_uncond = tf.reduce_mean((D_w[1] - 1.) ** 2)
       D_loss_fake_uncond = tf.reduce_mean(D_G_z[1] ** 2)
 
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-             + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond
+      D_loss = D_loss_real + D_loss_fake \
+             + D_loss_real_uncond + D_loss_fake_uncond
       D_loss /= 2
     else:
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
+      D_loss = D_loss_real + D_loss_fake
   elif args.wavegan_loss == 'wgan':
     # Conditional G Loss
     G_loss = -tf.reduce_mean(D_G_z[0])
@@ -220,20 +220,20 @@ def train(fps, args):
 
     # Conditional D Loss
     D_loss_real = -tf.reduce_mean(D_x[0])
-    D_loss_wrong = tf.reduce_mean(D_w[0])
+    # D_loss_wrong = tf.reduce_mean(D_w[0])
     D_loss_fake = tf.reduce_mean(D_G_z[0]) 
 
     # Unconditional D Loss
     if args.use_extra_uncond_loss:
       D_loss_real_uncond = -tf.reduce_mean(D_x[1])
-      D_loss_wrong_uncond = -tf.reduce_mean(D_w[1])
+      # D_loss_wrong_uncond = -tf.reduce_mean(D_w[1])
       D_loss_fake_uncond = tf.reduce_mean(D_G_z[1])
 
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-             + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond
+      D_loss = D_loss_real + D_loss_fake \
+             + D_loss_real_uncond + D_loss_fake_uncond
       D_loss /= 2
     else:
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
+      D_loss = D_loss_real + D_loss_fake
 
     with tf.name_scope('D_clip_weights'):
       clip_ops = []
@@ -258,46 +258,37 @@ def train(fps, args):
 
     # Conditional D Loss
     D_loss_real = -tf.reduce_mean(D_x[0])
-    D_loss_wrong = tf.reduce_mean(D_w[0])
+    # D_loss_wrong = tf.reduce_mean(D_w[0])
     D_loss_fake = tf.reduce_mean(D_G_z[0]) 
 
     # Unconditional D Loss
     if args.use_extra_uncond_loss:
       D_loss_real_uncond = -tf.reduce_mean(D_x[1])
-      D_loss_wrong_uncond = -tf.reduce_mean(D_w[1])
+      # D_loss_wrong_uncond = -tf.reduce_mean(D_w[1])
       D_loss_fake_uncond = tf.reduce_mean(D_G_z[1])
 
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-             + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond
+      D_loss = D_loss_real + D_loss_fake \
+             + D_loss_real_uncond + D_loss_fake_uncond
       D_loss /= 2
     else:
-      D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
-
-    # Stack duplicate context embeddings for extra interps on wrong audio
-    interp_args = args.wavegan_d_kwargs.copy()
-    interp_args['context_embedding'] = tf.concat([interp_args['context_embedding'], interp_args['context_embedding']], 0)
+      D_loss = D_loss_real + D_loss_fake
 
     # Conditional Gradient Penalty
-    alpha = tf.random_uniform(shape=[args.train_batch_size * 2, 1, 1], minval=0., maxval=1.)
-    real = tf.concat([x, x], 0)
-    fake = tf.concat([G_z, wrong_audio], 0)
-    differences = fake - real
-    interpolates = real + (alpha * differences)
+    alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+    differences = G_z - x
+    interpolates = x + (alpha * differences)
     with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
-      D_interp = WaveGANDiscriminator(interpolates, **interp_args)[0] # Only want conditional output
+      D_interp = WaveGANDiscriminator(interpolates, **args.wavegan_d_kwargs)[0] # Only want conditional output
 
     gradients = tf.gradients(D_interp, [interpolates])[0]
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
     cond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
     # Unconditional Gradient Penalty
-    alpha = tf.random_uniform(shape=[args.train_batch_size * 2, 1, 1], minval=0., maxval=1.)
-    real = tf.concat([x, wrong_audio], 0)
-    fake = tf.concat([G_z, G_z], 0)
-    differences = fake - real
-    interpolates = real + (alpha * differences)
+    alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+    interpolates = x + (alpha * differences)
     with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
-      D_interp = WaveGANDiscriminator(interpolates, **interp_args)[1] # Only want unconditional output
+      D_interp = WaveGANDiscriminator(interpolates, **args.wavegan_d_kwargs)[1] # Only want unconditional output
 
     gradients = tf.gradients(D_interp, [interpolates])[0]
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
@@ -317,38 +308,38 @@ def train(fps, args):
     if args.use_extra_uncond_loss:
       tf.summary.scalar('Critic Score - Real Data - Condition Match', -D_loss_real)
       tf.summary.scalar('Critic Score - Fake Data - Condition Match', D_loss_fake)
-      tf.summary.scalar('Critic Score - Wrong Data - Condition Match', D_loss_wrong)
+      # tf.summary.scalar('Critic Score - Wrong Data - Condition Match', D_loss_wrong)
       tf.summary.scalar('Critic Score - Real Data', -D_loss_real_uncond)
-      tf.summary.scalar('Critic Score - Wrong Data', -D_loss_wrong_uncond)
+      # tf.summary.scalar('Critic Score - Wrong Data', -D_loss_wrong_uncond)
       tf.summary.scalar('Critic Score - Fake Data', D_loss_fake_uncond)
       tf.summary.scalar('Wasserstein Distance - No Regularization Term',
-                        -((D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-                        + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond) / 2))
+                        -(D_loss_real + D_loss_fake \
+                        + D_loss_real_uncond + D_loss_fake_uncond) / 2)
     else:
       tf.summary.scalar('Critic Score - Real Data', -D_loss_real)
-      tf.summary.scalar('Critic Score - Wrong Data', D_loss_wrong)
+      # tf.summary.scalar('Critic Score - Wrong Data', D_loss_wrong)
       tf.summary.scalar('Critic Score - Fake Data', D_loss_fake)
-      tf.summary.scalar('Wasserstein Distance - No Regularization Term', -(D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)))
+      tf.summary.scalar('Wasserstein Distance - No Regularization Term', -(D_loss_real + D_loss_fake))
     tf.summary.scalar('Wasserstein Distance - With Regularization Term', -D_loss)
   else:
     if args.use_extra_uncond_loss:
-      tf.summary.scalar('D_acc_uncond', 0.5 * ((0.5 * (tf.reduce_mean(tf.sigmoid(D_x[1])) + tf.reduce_mean(tf.sigmoid(D_w[1])))) \
+      tf.summary.scalar('D_acc_uncond', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[1])) \
                                              + tf.reduce_mean(1 - tf.sigmoid(D_G_z[1]))))
       tf.summary.scalar('D_acc', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
-                                      + 0.5 * (tf.reduce_mean(1 - tf.sigmoid(D_w[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0])))))
-      tf.summary.scalar('D_loss_real', D_loss_real + D_loss_real_uncond + D_loss_wrong_uncond)
-      tf.summary.scalar('D_loss_wrong', D_loss_wrong)
+                                      + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0]))))
+      tf.summary.scalar('D_loss_real', D_loss_real + D_loss_real_uncond)
+      # tf.summary.scalar('D_loss_wrong', D_loss_wrong)
       tf.summary.scalar('D_loss_fake', D_loss_fake + D_loss_fake_uncond)
       tf.summary.scalar('D_loss_unregularized', 
-                         D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-                       + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond)
+                         D_loss_real + D_loss_fake \
+                       + D_loss_real_uncond + D_loss_fake_uncond)
     else:
       tf.summary.scalar('D_acc', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
-                                      + 0.5 * (tf.reduce_mean(1 - tf.sigmoid(D_w[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0])))))
+                                      + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0]))))
       tf.summary.scalar('D_loss_real', D_loss_real)
-      tf.summary.scalar('D_loss_wrong', D_loss_wrong)
+      # tf.summary.scalar('D_loss_wrong', D_loss_wrong)
       tf.summary.scalar('D_loss_fake', D_loss_fake)
-      tf.summary.scalar('D_loss_unregularized', D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake))
+      tf.summary.scalar('D_loss_unregularized', D_loss_real + D_loss_fake)
     tf.summary.scalar('D_loss', D_loss)
 
   # Create (recommended) optimizer
