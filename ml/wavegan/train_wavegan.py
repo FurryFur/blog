@@ -282,19 +282,21 @@ def train(fps, args):
 
     gradients = tf.gradients(D_interp, [interpolates])[0]
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    cond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+    gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
     # Unconditional Gradient Penalty
-    alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
-    interpolates = x + (alpha * differences)
-    with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
-      D_interp = WaveGANDiscriminator(interpolates, **args.wavegan_d_kwargs)[1] # Only want unconditional output
+    if args.use_extra_uncond_loss:
+      alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+      interpolates = x + (alpha * differences)
+      with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
+        D_interp = WaveGANDiscriminator(interpolates, **args.wavegan_d_kwargs)[1] # Only want unconditional output
 
-    gradients = tf.gradients(D_interp, [interpolates])[0]
-    slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    uncond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+      gradients = tf.gradients(D_interp, [interpolates])[0]
+      slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
+      uncond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
-    gradient_penalty = (cond_gradient_penalty + uncond_gradient_penalty) / 2
+      gradient_penalty += uncond_gradient_penalty
+      gradient_penalty /= 2
 
     LAMBDA = 10
     D_loss += LAMBDA * gradient_penalty
