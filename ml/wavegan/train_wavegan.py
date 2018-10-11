@@ -30,7 +30,7 @@ _D_Z = 128
 def train(fps, args):
   with tf.name_scope('loader'):
     x, cond_text, _ = loader.get_batch(fps, args.train_batch_size, _WINDOW_LEN, args.data_first_window, conditionals=True, name='batch')
-    wrong_audio = loader.get_batch(fps, args.train_batch_size, _WINDOW_LEN, args.data_first_window, conditionals=False, name='wrong_batch')
+    # wrong_audio = loader.get_batch(fps, args.train_batch_size, _WINDOW_LEN, args.data_first_window, conditionals=False, name='wrong_batch')
    # wrong_cond_text, wrong_cond_text_embed = loader.get_batch(fps, args.train_batch_size, _WINDOW_LEN, args.data_first_window, wavs=False, conditionals=True, name='batch')
     
   # Make z vector
@@ -99,7 +99,7 @@ def train(fps, args):
   # tf.summary.scalar('embeds_from_history_size', tf.shape(embeds_from_history)[0])
   # tf.summary.audio('G_z_history', g_from_history, _FS, max_outputs=10)
   # tf.summary.audio('x_history', r_from_history, _FS, max_outputs=10)
-  tf.summary.audio('wrong_audio', wrong_audio, _FS, max_outputs=10)
+  # tf.summary.audio('wrong_audio', wrong_audio, _FS, max_outputs=10)
   tf.summary.scalar('Conditional Resample - KL-Loss', c_kl_loss)
   # tf.summary.scalar('embed_error_cosine', tf.reduce_sum(tf.multiply(cond_text_embed, expected_embed)) / (tf.norm(cond_text_embed) * tf.norm(expected_embed)))
   # tf.summary.scalar('embed_error_cosine_wrong', tf.reduce_sum(tf.multiply(wrong_cond_text_embed, expected_embed)) / (tf.norm(wrong_cond_text_embed) * tf.norm(expected_embed)))
