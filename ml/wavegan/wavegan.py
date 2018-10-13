@@ -226,73 +226,52 @@ def WaveGANGenerator(
     kl_loss = 0
 
   # FC and reshape for convolution
-  # [100 + context_embedding size] -> [16, 1024]
+  # [100] -> [16, 1024]
   with tf.variable_scope('z_project'):
-    output = tf.layers.dense(output, 4 * 4 * dim * 2)
-    output = tf.reshape(output, [batch_size, 16, dim * 2])
-    output = tf.nn.relu(output)
-    # output = batchnorm(output)
-
-  # Dense 0
-  # [16, 128] -> [16, 1024]
-  with tf.variable_scope('dense_0'):
-    output = dense_block(output, 7, dim * 2, kernel_len, batchnorm_fn=batchnorm)
+    output = tf.layers.dense(output, 4 * 4 * dim * 16)
+    output = tf.reshape(output, [batch_size, 16, dim * 16])
     output = batchnorm(output)
-    
+  output = tf.nn.relu(output)
 
   # Layer 0
-  # [16, 1024] -> [64, 256]
+  # [16, 1024] -> [64, 512]
   with tf.variable_scope('upconv_0'):
-    output = residual_unit(output, dim * 4, kernel_len, 4, upsample=upsample)
+    output = custom_conv1d(output, dim * 8, kernel_len, 4, upsample=upsample)
     output = batchnorm(output)
-
-  # Dense 1
-  # [64, 256] -> [64, 512]
-  with tf.variable_scope('dense_1'):
-    output = dense_block(output, 4, dim, kernel_len, batchnorm_fn=batchnorm)
-    output = batchnorm(output)
+  output = tf.nn.relu(output)
 
   # Layer 1
-  # [64, 512] -> [256, 64]
+  # [64, 512] -> [256, 256]
   with tf.variable_scope('upconv_1'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
+    output = custom_conv1d(output, dim * 4, kernel_len, 4, upsample=upsample)
     output = batchnorm(output)
-
-  # Dense 2
-  # [256, 64] -> [256, 256]
-  with tf.variable_scope('dense_2'):
-    output = dense_block(output, 3, dim, kernel_len, batchnorm_fn=batchnorm)
-    output = batchnorm(output)
+  output = tf.nn.relu(output)
 
   # Layer 2
-  # [256, 256] -> [1024, 64]
+  # [256, 256] -> [1024, 128]
   with tf.variable_scope('upconv_2'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
+    output = custom_conv1d(output, dim * 2, kernel_len, 4, upsample=upsample)
     output = batchnorm(output)
-
-  # Dense 3
-  # [1024, 64] -> [1024, 128]
-  with tf.variable_scope('dense_3'):
-    output = dense_block(output, 1, dim, kernel_len, batchnorm_fn=batchnorm)
-    output = batchnorm(output)
+  output = tf.nn.relu(output)
 
   # Layer 3
   # [1024, 128] -> [4096, 64]
   with tf.variable_scope('upconv_3'):
-    output = residual_unit(output, dim, kernel_len, 4, upsample=upsample)
+    output = custom_conv1d(output, dim, kernel_len, 4, upsample=upsample)
     output = batchnorm(output)
+  output = tf.nn.relu(output)
 
   # Layer 4
   # [4096, 64] -> [16384, 1]
   with tf.variable_scope('upconv_4'):
-    output = residual_unit(output, 1, kernel_len, 4, upsample=upsample)
-  #output = tf.nn.tanh(output)
+    output = custom_conv1d(output, 1, kernel_len, 4, upsample=upsample)
+  output = tf.nn.tanh(output)
 
   # Automatically update batchnorm moving averages every time G is used during training
   if train and use_batchnorm:
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    # if len(update_ops) != 10:
-    #   raise Exception('Other update ops found in graph')
+    if len(update_ops) != 10:
+      raise Exception('Other update ops found in graph')
     with tf.control_dependencies(update_ops):
       output = tf.identity(output)
 
