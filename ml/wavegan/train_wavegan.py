@@ -36,12 +36,16 @@ def train(fps, args):
   # Make z vector
   z = tf.random_normal([args.train_batch_size, _D_Z])
 
-  embed = hub.Module('https://tfhub.dev/google/elmo/2', trainable=False, name='embed')
-  cond_text_embed = embed(cond_text)
-
   # Add conditioning input to the model
-  args.wavegan_g_kwargs['context_embedding'] = cond_text_embed
-  args.wavegan_d_kwargs['context_embedding'] = args.wavegan_g_kwargs['context_embedding']
+  with tf.variable_scope('G'):
+    G_embed = hub.Module('https://tfhub.dev/google/elmo/2', trainable=True, name='G_embed')
+    G_cond_text_embed = G_embed(cond_text)
+    args.wavegan_g_kwargs['context_embedding'] = G_cond_text_embed
+
+  with tf.variable_scope('D'):
+    D_embed = hub.Module('https://tfhub.dev/google/elmo/2', trainable=True, name='D_embed')
+    D_cond_text_embed = D_embed(cond_text)
+    args.wavegan_d_kwargs['context_embedding'] = D_cond_text_embed
 
   with tf.variable_scope('G'):
     # Make generator
@@ -336,6 +340,8 @@ def train(fps, args):
                                              + tf.reduce_mean(1 - tf.sigmoid(D_G_z[1]))))
       tf.summary.scalar('D_acc', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
                                       + 0.5 * (tf.reduce_mean(1 - tf.sigmoid(D_w[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0])))))
+      tf.summary.scalar('D_acc_real_wrong_only', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
+                                                      + tf.reduce_mean(1 - tf.sigmoid(D_w[0]))))                                
       tf.summary.scalar('D_loss_cond_real', D_loss_real)
       tf.summary.scalar('D_loss_uncond_real', D_loss_real_uncond)
       tf.summary.scalar('D_loss_cond_wrong', D_loss_wrong)
