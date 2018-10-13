@@ -336,7 +336,7 @@ def encode_audio_stage_1(x,
     output = x
     with tf.variable_scope('downconv_0'):
       output = tf.layers.conv1d(output, dim, kernel_len, 4, padding='SAME')
-      output = batchnorm(output)
+      # output = batchnorm(output)
       output = lrelu(output)
       output = phaseshuffle(output)
 
@@ -344,8 +344,15 @@ def encode_audio_stage_1(x,
     # [4096, 64] -> [1024, 128]
     with tf.variable_scope('downconv_1'):
       output = tf.layers.conv1d(output, dim * 2, kernel_len, 4, padding='SAME')
-      output = batchnorm(output)
       output = lrelu(output)
+      output = batchnorm(output)
+      output = phaseshuffle(output)
+
+    # Dense 1
+    # [1024, 128] -> [1024, 64]
+    with tf.variable_scope('dense_1'):
+      output = dense_block(output, num_units=1, filters_per_unit=dim, out_dim=dim, kernel_width=kernel_len, activation=lrelu, batchnorm_fn=batchnorm)
+      output = batchnorm(output)
       output = phaseshuffle(output)
 
     return output
@@ -369,27 +376,47 @@ def encode_audio_stage_2(x,
 
   with tf.variable_scope('audio_encode_stage_2'):
     # Layer 2
-    # [1024, 128] -> [256, 256]
+    # [1024, 64] -> [256, 256]
     with tf.variable_scope('downconv_2'):
       output = tf.layers.conv1d(x, dim * 4, kernel_len, 4, padding='SAME')
-      output = batchnorm(output)
       output = lrelu(output)
+      output = batchnorm(output)
+      output = phaseshuffle(output)
+
+    # Dense 2
+    # [256, 256] -> [256, 64]
+    with tf.variable_scope('dense_2'):
+      output = dense_block(output, num_units=3, filters_per_unit=dim, out_dim=dim, kernel_width=kernel_len, activation=lrelu, batchnorm_fn=batchnorm)
+      output = batchnorm(output)
       output = phaseshuffle(output)
 
     # Layer 3
-    # [256, 256] -> [64, 512]
+    # [256, 64] -> [64, 512]
     with tf.variable_scope('downconv_3'):
       output = tf.layers.conv1d(output, dim * 8, kernel_len, 4, padding='SAME')
-      output = batchnorm(output)
       output = lrelu(output)
+      output = batchnorm(output)
+      output = phaseshuffle(output)
+
+    # Dense 3
+    # [64, 512] -> [64, 256]
+    with tf.variable_scope('dense_3'):
+      output = dense_block(output, num_units=4, filters_per_unit=dim, out_dim=dim * 4, kernel_width=kernel_len, activation=lrelu, batchnorm_fn=batchnorm)
+      output = batchnorm(output)
       output = phaseshuffle(output)
 
     # Layer 4
-    # [64, 512] -> [16, 1024]
+    # [64, 256] -> [16, 1024]
     with tf.variable_scope('downconv_4'):
       output = tf.layers.conv1d(output, dim * 16, kernel_len, 4, padding='SAME')
-      output = batchnorm(output)
       output = lrelu(output)
+      output = batchnorm(output)
+      output = phaseshuffle(output)
+
+    # [16, 1024] -> [16, 128]
+    with tf.variable_scope('dense_4'):
+      output = dense_block(output, num_units=7, filters_per_unit=dim, out_dim=dim * 2, kernel_width=kernel_len, activation=lrelu, batchnorm_fn=batchnorm)
+      output = batchnorm(output)
 
     # Add explicit statistics
     # output = minibatch_stddev_layer(output)
