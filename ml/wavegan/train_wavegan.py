@@ -91,9 +91,10 @@ def train(fps, args):
   nparams = 0
   for v in G_vars:
     v_shape = v.get_shape().as_list()
-    v_n = reduce(lambda x, y: x * y, v_shape)
-    nparams += v_n
-    print('{} ({}): {}'.format(v.get_shape().as_list(), v_n, v.name))
+    if v_shape:
+      v_n = reduce(lambda x, y: x * y, v_shape)
+      nparams += v_n
+      print('{} ({}): {}'.format(v.get_shape().as_list(), v_n, v.name))
   print('Total params: {} ({:.2f} MB)'.format(nparams, (float(nparams) * 4) / (1024 * 1024)))
 
   # Summarize
@@ -119,9 +120,10 @@ def train(fps, args):
   nparams = 0
   for v in D_vars:
     v_shape = v.get_shape().as_list()
-    v_n = reduce(lambda x, y: x * y, v_shape)
-    nparams += v_n
-    print('{} ({}): {}'.format(v.get_shape().as_list(), v_n, v.name))
+    if v_shape:
+      v_n = reduce(lambda x, y: x * y, v_shape)
+      nparams += v_n
+      print('{} ({}): {}'.format(v.get_shape().as_list(), v_n, v.name))
   print('Total params: {} ({:.2f} MB)'.format(nparams, (float(nparams) * 4) / (1024 * 1024)))
   print('-' * 80)
 
