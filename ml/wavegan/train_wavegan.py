@@ -342,32 +342,44 @@ def train(fps, args):
   # def smoothstep(x, mi, mx):
   #   return mi + (mx-mi)*(lambda t: np.where(t < 0 , 0, np.where( t <= 1 , 3*t**2-2*t**3, 1 ) ) )( x )
 
+  # Always use unconditional loss for switching as we are trying to improve quality, not conditioning
+  if args.use_extra_uncond_loss:
+    D_dcgan_acc_op = 0.5 * ((0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[1])) + tf.reduce_mean(tf.sigmoid(D_w_dcgan[1])))) \
+                          + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[1])))
+  else:
+    D_dcgan_acc_op = 0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[0])))
+
   # Run training
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=args.train_dir,
       save_checkpoint_secs=args.train_save_secs,
       save_summaries_secs=args.train_summary_secs) as sess:
 
-    # Always use unconditional loss for switching as we are trying to improve quality, not conditioning
-    if args.use_extra_uncond_loss:
-      D_dcgan_acc = 0.5 * ((0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[1])) + tf.reduce_mean(tf.sigmoid(D_w_dcgan[1])))) \
-                         + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[1])))
-    else:
-      D_dcgan_acc = 0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[0])))
+    # Get the summary writer for writing extra summary statistics
+    summary_writer = SummaryWriterCache.get(args.train_dir)
     
     _lod = 0
     while True:
 
+      D_dcgan_acc = sess.run(D_dcgan_acc_op, feed_dict={lod: _lod})
+
       if D_dcgan_acc > 0.60:
         # Use WGAN-GP if DCGAN discriminator is performing too well (generated samples are too distant from real)
         D_train_op = D_train_op_wgan_gp
-        G_train_op = D_train_op_wgan_gp
+        G_train_op = G_train_op_wgan_gp
         min_train_iterations = 100
+        using_dcgan_summary = tf.Summary(value=[
+          tf.Summary.Value(tag="using_dcgan", simple_value=0), 
+        ])
       else:
         # Otherwise use DCGAN (generated samples are converging to real)
         D_train_op = D_train_op_dcgan
-        G_train_op = D_train_op_dcgan
+        G_train_op = G_train_op_dcgan
         min_train_iterations = 100
+        using_dcgan_summary = tf.Summary(value=[
+          tf.Summary.Value(tag="using_dcgan", simple_value=1), 
+        ])
+      summary_writer.add_summary(using_dcgan_summary)
 
       for _ in range(min_train_iterations):
         # Select a random LOD to train
