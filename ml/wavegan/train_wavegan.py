@@ -350,10 +350,13 @@ def train(fps, args):
     D_dcgan_acc_op = 0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[0])))
   
   # Run training
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=args.train_dir,
       save_checkpoint_secs=args.train_save_secs,
-      save_summaries_secs=args.train_summary_secs) as sess:
+      save_summaries_secs=args.train_summary_secs,
+      config=config) as sess:
 
     # Get the summary writer for writing extra summary statistics
     summary_writer = SummaryWriterCache.get(args.train_dir)
