@@ -348,7 +348,7 @@ def train(fps, args):
                           + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[1])))
   else:
     D_dcgan_acc_op = 0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[0])))
-
+  
   # Run training
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=args.train_dir,
@@ -359,9 +359,8 @@ def train(fps, args):
     summary_writer = SummaryWriterCache.get(args.train_dir)
     
     _lod = 0
+    D_dcgan_acc = 0.5
     while True:
-
-      D_dcgan_acc = sess.run(D_dcgan_acc_op, feed_dict={lod: _lod})
 
       if D_dcgan_acc > 0.60:
         # Use WGAN-GP if DCGAN discriminator is performing too well (generated samples are too distant from real)
@@ -387,10 +386,10 @@ def train(fps, args):
 
         # Train discriminator
         for _ in range(args.wavegan_disc_nupdates):
-          sess.run(D_train_op, feed_dict={lod: _lod})
+          _, D_dcgan_acc = sess.run([D_train_op, D_dcgan_acc_op], feed_dict={lod: _lod})
 
         # Train generator
-        sess.run(G_train_op, feed_dict={lod: _lod})
+        _, D_dcgan_acc = sess.run([G_train_op, D_dcgan_acc_op], feed_dict={lod: _lod})
 
 
 """
