@@ -219,31 +219,26 @@ def train(fps, args):
   else:
     D_loss_wgan_gp = D_loss_wgan_gp_real + 0.5 * (D_loss_wgan_gp_wrong + D_loss_wgan_gp_fake)
 
-
-  # Stack duplicate context embeddings for extra interps on wrong audio
-  interp_args = args.wavegan_d_wgan_gp_kwargs.copy()
-  interp_args['context_embedding'] = tf.concat([interp_args['context_embedding'], interp_args['context_embedding']], 0)
-
   # Conditional Gradient Penalty
-  alpha = tf.random_uniform(shape=[args.train_batch_size * 2, 1, 1], minval=0., maxval=1.)
-  real = tf.concat([x, x], 0)
-  fake = tf.concat([G_z, wrong_audio], 0)
+  alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+  real = x
+  fake = tf.concat([G_z[:args.train_batch_size // 2], wrong_audio[:args.train_batch_size // 2]], 0)
   differences = fake - real
   interpolates = real + (alpha * differences)
   with tf.name_scope('D_interp'), tf.variable_scope('D_wgan_gp', reuse=True):
-    D_interp = WaveGANDiscriminator(interpolates, lod, **interp_args)[0] # Only want conditional output
+    D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_wgan_gp_kwargs)[0] # Only want conditional output
   gradients = tf.gradients(D_interp, [interpolates])[0]
   slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
   cond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
   # Unconditional Gradient Penalty
-  alpha = tf.random_uniform(shape=[args.train_batch_size * 2, 1, 1], minval=0., maxval=1.)
-  real = tf.concat([x, wrong_audio], 0)
-  fake = tf.concat([G_z, G_z], 0)
+  alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+  real = x
+  fake = G_z
   differences = fake - real
   interpolates = real + (alpha * differences)
   with tf.name_scope('D_interp'), tf.variable_scope('D_wgan_gp', reuse=True):
-    D_interp = WaveGANDiscriminator(interpolates, lod, **interp_args)[1] # Only want unconditional output
+    D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_wgan_gp_kwargs)[1] # Only want unconditional output
   gradients = tf.gradients(D_interp, [interpolates])[0]
   slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
   uncond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
@@ -350,13 +345,10 @@ def train(fps, args):
     D_dcgan_acc_op = 0.5 * (tf.reduce_mean(tf.sigmoid(D_x_dcgan[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z_dcgan[0])))
   
   # Run training
-  config = tf.ConfigProto()
-  config.gpu_options.allow_growth = True
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=args.train_dir,
       save_checkpoint_secs=args.train_save_secs,
-      save_summaries_secs=args.train_summary_secs,
-      config=config) as sess:
+      save_summaries_secs=args.train_summary_secs) as sess:
 
     # Get the summary writer for writing extra summary statistics
     summary_writer = SummaryWriterCache.get(args.train_dir)
