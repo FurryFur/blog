@@ -40,81 +40,6 @@ def custom_conv1d(
         strides=stride, 
         padding='same')
 
-def residual_unit(    
-    inputs,
-    filters,
-    kernel_width=24,
-    stride=1,
-    padding='same',
-    upsample=None,
-    activation=tf.nn.tanh,
-    is_gated=True):
-  # Shortcut connection
-  if (upsample is not None) or (inputs.shape[-1] != filters) or (stride != 1):
-    shortcut = custom_conv1d(inputs, filters, 1, stride, padding, upsample)
-  else:
-    shortcut = inputs
-
-  # Up-Conv + Gated Activation
-  z1 = custom_conv1d(inputs, filters, kernel_width, stride, padding, upsample)
-  output = activation(z1)
-  if is_gated:
-    z2 = custom_conv1d(inputs, filters, kernel_width, stride, padding, upsample)
-    gate = tf.sigmoid(z2)
-    output = gate * output
-
-  return output + shortcut
-
-
-def dense_block(
-    inputs,
-    num_units,
-    filters_per_unit=32,
-    kernel_width=24,
-    out_dim=None,
-    activation=tf.tanh,
-    batchnorm_fn=lambda x: x):
-  """
-  input: Input tensor
-  num_units: Number of internal convolution units in the dense block
-  batchnorm_fn: A function for normalizing each layer
-  filters_per_unit: The number of filters produced by each unit, these are stacked together
-  so the final output filters will be num_units * filters_per_unit + input filters
-  out_dim: Settings this will override the output dimension using 1 by 1 convolution at end of block
-  kernel_width: The size of the kernel used by each convolutional unit
-  """
-  output = inputs
-  for i in range(num_units):
-    with tf.variable_scope("unit_{}".format(i)):
-      bn = batchnorm_fn(output) if i != 0 else output
-      unit_out = residual_unit(bn, filters_per_unit, kernel_width, activation=activation)
-      output = tf.concat([output, unit_out], 2)
-
-  # Resize out dimensions on request
-  if out_dim is not None:
-    with tf.variable_scope("1_by_1"):
-      return residual_unit(output, out_dim, 1, activation=activation)
-  else:
-    return output
-
-
-def inception_block(inputs, filters_internal=64, kernel_width=24):
-  shortcut = inputs
-
-  filter1 = tf.layers.conv1d(inputs, filters_internal, 1, padding="SAME")
-  filter1 = tf.layers.conv1d(filter1, filters_internal, kernel_width // 4, padding="SAME")
-
-  filter2 = tf.layers.conv1d(inputs, filters_internal, 1, padding="SAME")
-  filter2 = tf.layers.conv1d(filter2, filters_internal, kernel_width // 2, padding="SAME")
-
-  filter3 = tf.layers.conv1d(inputs, filters_internal, 1, padding="SAME")
-  filter3 = tf.layers.conv1d(filter3, filters_internal, kernel_width, padding="SAME")
-
-  concat = tf.concat([filter1, filter2, filter3], 2)
-  output = tf.layers.conv1d(concat, inputs.shape[-1], 1, padding="SAME")
-
-  return shortcut + output
-
 
 def lrelu(inputs, alpha=0.2):
   return tf.maximum(alpha * inputs, inputs)
@@ -293,7 +218,7 @@ def apply_phaseshuffle(x, rad, pad_type='reflect'):
   return x
 
 
-def encode_audio_stage_1(x,
+def encode_audio(x,
     kernel_len=24,
     dim=64,
     use_batchnorm=False,
@@ -309,7 +234,7 @@ def encode_audio_stage_1(x,
   else:
     phaseshuffle = lambda x: x
 
-  with tf.variable_scope('audio_encode_stage_1'):
+  with tf.variable_scope('encode_audio'):
     # Layer 0
     # [16384, 1] -> [4096, 64]
     output = x
@@ -327,30 +252,10 @@ def encode_audio_stage_1(x,
       output = lrelu(output)
       output = phaseshuffle(output)
 
-    return output
-
-
-def encode_audio_stage_2(x,
-    kernel_len=24,
-    dim=64,
-    use_batchnorm=False,
-    phaseshuffle_rad=0,
-    embedding_dim=128):
-  if use_batchnorm:
-    batchnorm = lambda x: tf.layers.batch_normalization(x, training=True)
-  else:
-    batchnorm = lambda x: x
-
-  if phaseshuffle_rad > 0:
-    phaseshuffle = lambda x: apply_phaseshuffle(x, phaseshuffle_rad)
-  else:
-    phaseshuffle = lambda x: x
-
-  with tf.variable_scope('audio_encode_stage_2'):
     # Layer 2
     # [1024, 128] -> [256, 256]
     with tf.variable_scope('downconv_2'):
-      output = tf.layers.conv1d(x, dim * 4, kernel_len, 4, padding='SAME')
+      output = tf.layers.conv1d(output, dim * 4, kernel_len, 4, padding='SAME')
       output = batchnorm(output)
       output = lrelu(output)
       output = phaseshuffle(output)
@@ -369,13 +274,6 @@ def encode_audio_stage_2(x,
       output = tf.layers.conv1d(output, dim * 16, kernel_len, 4, padding='SAME')
       output = batchnorm(output)
       output = lrelu(output)
-
-    # Add explicit statistics
-    # output = minibatch_stddev_layer(output)
-    # with tf.variable_scope('stats_blend'):
-    #   output = tf.layers.conv1d(output, dim * 16, kernel_len, 1, padding='SAME')
-    #   output = batchnorm(output)
-    # output = lrelu(output)
 
       # Flatten
     # [16, 1024] -> [16384]
@@ -399,14 +297,11 @@ def WaveGANDiscriminator(
     embedding_dim=128,
     use_extra_uncond_output=False):
 
-  stage_1 = encode_audio_stage_1(x, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
-
-  with tf.variable_scope('unconditional'):
-    uncond_out = encode_audio_stage_2(stage_1, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
+  x_code = encode_audio(x, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
   
   if (context_embedding is not None):
     with tf.variable_scope('conditional'):
-      cond_out = encode_audio_stage_2(stage_1, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
+      cond_out = x_code
 
       # Concat context embeddings
       # [16384] -> [16384 + embedding_dim]
@@ -418,17 +313,16 @@ def WaveGANDiscriminator(
       with tf.variable_scope('FC'):
         cond_out = tf.layers.dense(cond_out, dim * 16)
         cond_out = lrelu(cond_out)
-        cond_out = tf.layers.dropout(cond_out)
         output = cond_out
   else:
-    output = uncond_out
+    output = x_code
 
   # Connect to single logit
   # [16384] -> [1]
   with tf.variable_scope('output'):
     output = tf.layers.dense(output, 1)
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_out = tf.layers.dense(uncond_out, 1)
+      uncond_out = tf.layers.dense(x_code, 1)
       return [output, uncond_out]
     else:
       return [output]
