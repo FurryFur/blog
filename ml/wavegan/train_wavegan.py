@@ -319,7 +319,11 @@ def train(fps, args):
       tf.summary.scalar('Critic Score - Fake Data', D_loss_fake_uncond)
       tf.summary.scalar('Wasserstein Distance - No Regularization Term',
                         -((D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake) \
-                        + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond) / 2))
+                         + 0.5 * (D_loss_real_uncond + D_loss_wrong_uncond) + D_loss_fake_uncond) / 2))
+      tf.summary.scalar('Wasserstein Distance - Real-Wrong Only', -(D_loss_real + D_loss_wrong))
+      tf.summary.scalar('Wasserstein Distance - Real-Fake Only',
+                        -((D_loss_real + D_loss_fake \
+                         + D_loss_real_uncond + D_loss_fake_uncond) / 2))
     else:
       tf.summary.scalar('Critic Score - Real Data', -D_loss_real)
       tf.summary.scalar('Critic Score - Wrong Data', D_loss_wrong)
@@ -332,6 +336,8 @@ def train(fps, args):
                                              + tf.reduce_mean(1 - tf.sigmoid(D_G_z[1]))))
       tf.summary.scalar('D_acc', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
                                       + 0.5 * (tf.reduce_mean(1 - tf.sigmoid(D_w[0])) + tf.reduce_mean(1 - tf.sigmoid(D_G_z[0])))))
+      tf.summary.scalar('D_acc_real_wrong_only', 0.5 * (tf.reduce_mean(tf.sigmoid(D_x[0])) \
+                                                      + tf.reduce_mean(1 - tf.sigmoid(D_w[0]))))
       tf.summary.scalar('D_loss_cond_real', D_loss_real)
       tf.summary.scalar('D_loss_uncond_real', D_loss_real_uncond)
       tf.summary.scalar('D_loss_cond_wrong', D_loss_wrong)
