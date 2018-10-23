@@ -398,13 +398,13 @@ def encode_audio(x,
     audio_lod = x
     h_code = from_audio(x, dim)
     for i in range(lod_levels - 1, 0, -1):
-      with tf.variable_scope('downconv_{}'.format(i - 1)):
+      with tf.variable_scope('downconv_{}'.format(lod_levels - 1 - i)):
         on_amount = lod - i + 1
         filters = min(dim * 64, dim * (2 ** (lod_levels - 1)) // (2 ** i))
         h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
 
         # Summary info
-        if '/D_x/' in tf.get_variable_scope().name: # Only output for a single discriminator (discriminator on real audio clips)
+        if 'D_x/' in tf.get_default_graph().get_name_scope(): # Only output for a single discriminator (discriminator on real audio clips)
           tf.summary.scalar('on_amount', on_amount)
           # Slightly hacky fix for tf.summary.audio not working with low sample rates
           summary_audio = audio_lod
