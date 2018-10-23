@@ -2,9 +2,9 @@ python train_wavegan.py train .\train ^
 --data_dir .\data\Final_Datasets\All ^
 --data_first_window ^
 --use_extra_uncond_loss ^
---wavegan_kernel_len 8 ^
+--wavegan_kernel_len 4 ^
 --wavegan_genr_upsample zeros ^
---train_batch_size 50 ^
+--train_batch_size 64 ^
 --wavegan_disc_nupdates 1 ^
 --train_summary_secs 15
 
