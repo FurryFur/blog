@@ -409,11 +409,11 @@ def train(fps, args):
         learning_rate=5e-5)
   elif args.wavegan_loss == 'wgan-gp':
     G_opt = tf.train.AdamOptimizer(
-        learning_rate=1e-3,
+        learning_rate=6e-4,
         beta1=0.5,
         beta2=0.9)
     D_opt = tf.train.AdamOptimizer(
-        learning_rate=1e-3,
+        learning_rate=6e-4,
         beta1=0.5,
         beta2=0.9)
   else:
