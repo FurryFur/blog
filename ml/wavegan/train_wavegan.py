@@ -469,7 +469,7 @@ def train(fps, args):
                              7,  lambda x: smoothstep((x - 30000) / 2000, 7, 8),
                              8,  lambda x: smoothstep((x - 34000) / 2000, 8, 9),
                              9,  lambda x: smoothstep((x - 38000) / 2000, 9, 10),
-                             0,  lambda x: smoothstep((x - 42000) / 2000, 10, 11),
+                             10, lambda x: smoothstep((x - 42000) / 2000, 10, 11),
                              11, lambda x: smoothstep((x - 46000) / 2000, 11, 12),
                              12])
       
