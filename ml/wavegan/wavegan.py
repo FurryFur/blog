@@ -391,7 +391,8 @@ def encode_audio(x,
     phaseshuffle = lambda x: x
 
   with tf.variable_scope('audio_encode'):
-    tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_input_audio')
+    if 'D_x/' in tf.get_default_graph().get_name_scope():
+      tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_audio_lod_0')
 
     # [16384, 1] -> [16384, 4] (audio_lod)
     # [16384, 4] -> [4, 256] (h_code)
