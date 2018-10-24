@@ -392,7 +392,7 @@ def encode_audio(x,
 
   with tf.variable_scope('audio_encode'):
     if 'D_x/' in tf.get_default_graph().get_name_scope():
-      tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_audio_lod_0')
+      tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_audio_lod_12')
 
     # [16384, 1] -> [16384, 4] (audio_lod)
     # [16384, 4] -> [4, 256] (h_code)
@@ -411,7 +411,7 @@ def encode_audio(x,
           summary_audio = audio_lod
           for _ in range(lod_levels - 1 - i):
             summary_audio = nn_upsample(summary_audio)
-          tf.summary.audio('D_audio', summary_audio, 16000, max_outputs=10, family='D_audio_lod_{}'.format(i))
+          tf.summary.audio('D_audio', summary_audio, 16000, max_outputs=10, family='D_audio_lod_{}'.format(i - 1))
 
     return h_code, audio_lod
 

@@ -56,19 +56,16 @@ def train(fps, args):
   # Summarize
   G_z_rms = tf.sqrt(tf.reduce_mean(tf.square(G_z[:, :, 0]), axis=1))
   x_rms = tf.sqrt(tf.reduce_mean(tf.square(x[:, :, 0]), axis=1))
-  x_rms_lod_4 = tf.sqrt(tf.reduce_mean(tf.square(avg_downsample(x)[:, :, 0]), axis=1))
-  x_rms_lod_3 = tf.sqrt(tf.reduce_mean(tf.square(avg_downsample(avg_downsample(x))[:, :, 0]), axis=1))
-  x_rms_lod_2 = tf.sqrt(tf.reduce_mean(tf.square(avg_downsample(avg_downsample(avg_downsample(x)))[:, :, 0]), axis=1))
-  x_rms_lod_1 = tf.sqrt(tf.reduce_mean(tf.square(avg_downsample(avg_downsample(avg_downsample(avg_downsample(x))))[:, :, 0]), axis=1))
-  x_rms_lod_0 = tf.sqrt(tf.reduce_mean(tf.square(avg_downsample(avg_downsample(avg_downsample(avg_downsample(avg_downsample(x)))))[:, :, 0]), axis=1))
+  tf.summary.scalar('x_rms_audio_lod_12', tf.reduce_mean(x_rms))
+  summary_audio = x
+  lod_levels = 13
+  for i in range(lod_levels - 1, 0, -1):
+    summary_audio = avg_downsample(summary_audio)
+    x_rms = tf.sqrt(tf.reduce_mean(tf.square(summary_audio[:, :, 0]), axis=1))
+    tf.summary.scalar('x_rms_audio_lod_{}'.format(i-1), tf.reduce_mean(x_rms))
+
   tf.summary.histogram('x_rms_batch', x_rms)
   tf.summary.histogram('G_z_rms_batch', G_z_rms)
-  tf.summary.scalar('x_rms', tf.reduce_mean(x_rms))
-  tf.summary.scalar('x_rms_lod_4', tf.reduce_mean(x_rms_lod_4))
-  tf.summary.scalar('x_rms_lod_3', tf.reduce_mean(x_rms_lod_3))
-  tf.summary.scalar('x_rms_lod_2', tf.reduce_mean(x_rms_lod_2))
-  tf.summary.scalar('x_rms_lod_1', tf.reduce_mean(x_rms_lod_1))
-  tf.summary.scalar('x_rms_lod_0', tf.reduce_mean(x_rms_lod_0))
   tf.summary.scalar('G_z_rms', tf.reduce_mean(G_z_rms))
   tf.summary.audio('x', x, _FS, max_outputs=10)
   tf.summary.audio('G_z', G_z, _FS, max_outputs=10)
