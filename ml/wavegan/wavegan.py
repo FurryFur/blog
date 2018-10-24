@@ -410,7 +410,7 @@ def encode_audio(x,
           summary_audio = audio_lod
           for _ in range(lod_levels - 1 - i):
             summary_audio = nn_upsample(summary_audio)
-          tf.summary.audio('G_audio', summary_audio, 16000, max_outputs=10, family='D_audio_lod_{}'.format(i))
+          tf.summary.audio('D_audio', summary_audio, 16000, max_outputs=10, family='D_audio_lod_{}'.format(i))
 
     return h_code, audio_lod
 
