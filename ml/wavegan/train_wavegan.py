@@ -422,10 +422,6 @@ def train(fps, args):
   else:
     raise NotImplementedError()
 
-  # Optimizer internal state reset ops
-  reset_G_opt_op = tf.variables_initializer(G_opt.variables())
-  reset_D_opt_op = tf.variables_initializer(D_opt.variables())
-
   # Create training ops
   G_train_op = G_opt.minimize(G_loss, var_list=G_vars,
       global_step=tf.train.get_or_create_global_step())
@@ -447,7 +443,6 @@ def train(fps, args):
     summary_writer = SummaryWriterCache.get(args.train_dir)
 
     _lod = 0
-    prev_lod = 0
     while True:
       # Calculate Maximum LOD to train
       step, steps_at_cur_lod = sess.run([tf.train.get_or_create_global_step(), steps_at_cur_lod_var], feed_dict={lod: _lod})
@@ -471,11 +466,6 @@ def train(fps, args):
       # else:
       #   _lod = cur_lod
       _lod = cur_lod
-
-      # Reset optimizer internal state when new layers are introduced
-      if np.floor(cur_lod) != np.floor(prev_lod) or np.ceil(cur_lod) != np.ceil(prev_lod):
-        sess.run([reset_G_opt_op, reset_D_opt_op], feed_dict={lod: _lod})
-      prev_lod = cur_lod
       
       # Increment step counter when training on current LOD to smoothly interpolate between LOD levels.
       if _lod == cur_lod:
