@@ -367,6 +367,8 @@ def train(fps, args):
       tf.summary.scalar('Critic Score - Wrong Data', D_loss_wrong)
       tf.summary.scalar('Critic Score - Fake Data', D_loss_fake)
       tf.summary.scalar('Wasserstein Distance - No Regularization Term', -(D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)))
+      tf.summary.scalar('Wasserstein Distance - Real-Wrong Only', -(D_loss_real + D_loss_wrong))
+      tf.summary.scalar('Wasserstein Distance - Real-Fake Only', -(D_loss_real + D_loss_fake))
     tf.summary.scalar('Wasserstein Distance - With Regularization Term', -D_loss)
   else:
     if args.use_extra_uncond_loss:
