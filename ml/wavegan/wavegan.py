@@ -10,12 +10,26 @@ def nn_upsample(inputs, stride=4):
   Upsamples an audio clip using nearest neighbor upsampling.
   Output is of size 'audio clip length' x 'stride'
   '''
-  with tf.variable_scope('upsample'):
+  with tf.variable_scope('nn_upsample'):
     w = tf.shape(inputs)[1]
     output = tf.expand_dims(inputs, axis=1)
     output = tf.image.resize_nearest_neighbor(output, [1, w * stride])
     output = output[:, 0]
     return output
+
+
+def tconv_upsample(inputs, filters, kernel_size=8, stride=4):
+  '''
+  Upsamples an audio clip using transpose convolution upsampling.
+  Output is of size 'audio clip length' x 'stride'
+  '''
+  with tf.variable_scope('tcup'):
+    return tf.layers.conv2d_transpose(
+      tf.expand_dims(inputs, axis=1),
+      filters,
+      kernel_size=(1, kernel_size),
+      strides=(1, stride),
+      padding='same')[:, 0]
 
 
 def avg_downsample(inputs, stride=4):
@@ -36,10 +50,12 @@ def to_audio(in_code, pre_activation=lrelu, post_activation=tf.tanh, normalizati
   :param post_activation: Will be applied after downsampling to get final audio output.
   '''
   with tf.variable_scope('to_audio'):
-    output = normalization(in_code)
+    output = in_code
+    output = normalization(output)
     output = pre_activation(output)
     output = tf.layers.conv1d(output, filters=1, kernel_size=1, strides=1, padding='same')
-    return post_activation(output)
+    # output = post_activation(output)
+    return output
 
 def from_audio(inputs, out_feature_maps):
   '''
@@ -64,36 +80,41 @@ def add_conditioning(in_code, cond_embed):
     return h_c_code
 
 
-def up_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, activation=lrelu, normalization=lambda x: x):
+def up_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, activation=lrelu, normalization=lambda x: x, upsample_method='zeros'):
   '''
   Up Block
   '''
-  with tf.variable_scope('up_block'):
+  with tf.variable_scope('up'):
+    skip_connection_audio = nn_upsample(audio_lod, stride)
+
     def skip():
-      with tf.variable_scope('skip'):
-        skip_connection_audio = nn_upsample(audio_lod, stride)
+      with tf.variable_scope('sk'):
         skip_connection_code = tf.zeros([tf.shape(inputs)[0], tf.shape(inputs)[1] * stride, filters], dtype=tf.float32)
         return skip_connection_code, skip_connection_audio
 
     def transition():
-      with tf.variable_scope('transition'):
-        skip_connection_audio = nn_upsample(audio_lod, stride)
-
+      with tf.variable_scope('tr'):
         # Shortcut
-        with tf.variable_scope('shortcut'):
+        with tf.variable_scope('sh'):
           shortcut = nn_upsample(inputs, stride)
           if shortcut.get_shape().as_list()[2] != filters:
             shortcut = tf.layers.conv1d(shortcut, filters, kernel_size=1, strides=1, padding='same')
 
+        # TODO: Only compute code when fully on (this is when the code will actually be used by the next layer)
         code = inputs
 
         # Convolution layers
-        with tf.variable_scope('conv_0'):
+        with tf.variable_scope('co0'):
           code = normalization(code)
           code = activation(code) # Pre-Activation
-          code = nn_upsample(code, stride) # Upsample
-          code = tf.layers.conv1d(code, filters, kernel_size, strides=1, padding='same')
-        with tf.variable_scope('conv_1'):
+          if upsample_method == 'zeros':
+            code = tconv_upsample(code, filters, kernel_size, stride=stride) # Upsample - Transposed Convolution
+          elif upsample_method == 'nn':
+            code = nn_upsample(code, stride) # Upsample - Nearest Neighbor
+            code = tf.layers.conv1d(code, filters, kernel_size, strides=1, padding='same')
+          else:
+            raise NotImplementedError
+        with tf.variable_scope('co1'):
           code = normalization(code)
           code = activation(code)  # Pre-Activation
           code = tf.layers.conv1d(code, filters, kernel_size, strides=1, padding='same')
@@ -117,19 +138,18 @@ def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, a
   '''
   Down Block
   '''
-  with tf.variable_scope('down_block'):
+  with tf.variable_scope('db'):
     audio_lod = avg_downsample(audio_lod, stride)
+    skip_connection_code = from_audio(audio_lod, filters)
+
     def skip():
-      with tf.variable_scope('skip'):
-        skip_connection_code = from_audio(audio_lod, filters)
+      with tf.variable_scope('dk'):
         return skip_connection_code
 
     def transition():
-      with tf.variable_scope('transition'):
-        skip_connection_code = from_audio(audio_lod, filters)
-
+      with tf.variable_scope('tr'):
         # Shortcut
-        with tf.variable_scope('shortcut'):
+        with tf.variable_scope('sh'):
           shortcut = avg_downsample(inputs, stride)
           if shortcut.get_shape().as_list()[2] != filters:
             shortcut = tf.layers.conv1d(shortcut, filters, kernel_size=1, strides=1, padding='same')
@@ -137,11 +157,11 @@ def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, a
         code = inputs
 
          # Convolution layers
-        with tf.variable_scope('conv_0'):
+        with tf.variable_scope('co0'):
           code = normalization(code)
           code = activation(code)  # Pre-Activation
           code = tf.layers.conv1d(code, inputs.get_shape().as_list()[2], kernel_size, strides=1, padding='same')
-        with tf.variable_scope('conv_1'):
+        with tf.variable_scope('co1'):
           code = normalization(code)
           code = activation(code)  # Pre-Activation
           code = tf.layers.conv1d(code, filters, kernel_size, strides=stride, padding='same')
@@ -159,7 +179,7 @@ def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, a
 
 
 def residual_block(inputs, filters, kernel_size=9, stride=1, padding='same', activation=lrelu, normalization=lambda x: x):
-  with tf.variable_scope('residual_block'):
+  with tf.variable_scope('rb'):
     shortcut = inputs
     if shortcut.get_shape().as_list()[2] != filters:
       shortcut = tf.layers.conv1d(shortcut, filters, kernel_size=1, strides=1, padding='same')
@@ -167,11 +187,11 @@ def residual_block(inputs, filters, kernel_size=9, stride=1, padding='same', act
     code = inputs
 
     # Convolution layers
-    with tf.variable_scope('conv_0'):
+    with tf.variable_scope('co0'):
       code = normalization(code)
       code = activation(code)  # Pre-Activation
       code = tf.layers.conv1d(code, inputs.get_shape().as_list()[2], kernel_size, strides=1, padding='same')
-    with tf.variable_scope('conv_1'):
+    with tf.variable_scope('co1'):
       code = normalization(code)
       code = activation(code)  # Pre-Activation
       code = tf.layers.conv1d(code, filters, kernel_size, strides=stride, padding='same')
@@ -291,65 +311,55 @@ def WaveGANGenerator(
 
   # FC and reshape for convolution
   # [512] -> [16, 512]
-  with tf.variable_scope('z_project'):
+  with tf.variable_scope('z'):
     h_code = tf.layers.dense(h_code, 16 * dim * 32)
     h_code = tf.reshape(h_code, [batch_size, 16, dim * 32])
 
   # First residual block
   # [16, 512] -> [16, 512]
-  with tf.variable_scope('layer_0'):
+  with tf.variable_scope('l0'):
     h_code = residual_block(h_code, filters=dim * 32, kernel_size=kernel_len, normalization=batchnorm)
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
     audio_lod = to_audio(h_code, normalization=batchnorm)
     tf.summary.audio('G_audio', nn_upsample(nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod))))), 16000, max_outputs=10, family='G_audio_lod_0')
 
   # Layer 1
   # [16, 512] -> [64, 256]
-  with tf.variable_scope('upconv_1'):
+  with tf.variable_scope('up1'):
     on_amount = lod-0
-    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 16, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount)
+    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 16, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
     tf.summary.scalar('on_amount', on_amount)
     tf.summary.audio('G_audio', nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod)))), 16000, max_outputs=10, family='G_audio_lod_1')
 
   # Layer 2
   # [64, 256] -> [256, 128]
-  with tf.variable_scope('upconv_2'):
+  with tf.variable_scope('up2'):
     on_amount = lod-1
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
-    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 8, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount)
+    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 8, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
     tf.summary.scalar('on_amount', on_amount)
     tf.summary.audio('G_audio', nn_upsample(nn_upsample(nn_upsample(audio_lod))), 16000, max_outputs=10, family='G_audio_lod_2')
 
   # Layer 3
   # [256, 128] -> [1024, 64]
-  with tf.variable_scope('upconv_3'):
+  with tf.variable_scope('up3'):
     on_amount = lod-2
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
-    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 4, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount)
+    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 4, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
     tf.summary.scalar('on_amount', on_amount)
     tf.summary.audio('G_audio', nn_upsample(nn_upsample(audio_lod)), 16000, max_outputs=10, family='G_audio_lod_3')
 
   # Layer 3
   # [1024, 64] -> [4096, 32]
-  with tf.variable_scope('upconv_4'):
+  with tf.variable_scope('up4'):
     on_amount = lod-3
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
-    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 2, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount)
+    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim * 2, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
     tf.summary.scalar('on_amount', on_amount)
     tf.summary.audio('G_audio', nn_upsample(audio_lod), 16000, max_outputs=10, family='G_audio_lod_4')
 
   # Layer 4
   # [4096, 32] -> [16384, 16] (h_code)
   # [16384, 16] -> [16384, 1] (audio_lod)
-  with tf.variable_scope('upconv_5'):
+  with tf.variable_scope('up5'):
     on_amount = lod-4
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
-    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount)
+    h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=dim, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
     tf.summary.scalar('on_amount', on_amount)
     tf.summary.audio('G_audio', audio_lod, 16000, max_outputs=10, family='G_audio_lod_5')
 
@@ -396,53 +406,54 @@ def encode_audio(x,
   else:
     phaseshuffle = lambda x: x
 
-  with tf.variable_scope('audio_encode'):
-    tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_input_audio')
+  with tf.variable_scope('ae'):
+    if 'D_x/' in tf.get_default_graph().get_name_scope():
+      tf.summary.audio('input_audio', x, 16000, max_outputs=10, family='D_audio_lod_5')
 
     # Layer 0
     # [16384, 1] -> [16384, 16] (audio_lod)
     # [16384, 1] -> [4096, 32] (h_code)
-    with tf.variable_scope('downconv_0'):
+    with tf.variable_scope('do0'):
       on_amount = lod-4
       h_code, audio_lod = down_block(from_audio(x, dim), audio_lod=x, filters=dim * 2, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
-      if '/D_x/' in tf.get_variable_scope().name:
+      if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(audio_lod), 16000, max_outputs=10, family='D_audio_lod_4')
         tf.summary.scalar('on_amount', on_amount)
       
 
     # Layer 1
     # [4096, 32] -> [1024, 64]
-    with tf.variable_scope('downconv_1'):
+    with tf.variable_scope('do1'):
       on_amount = lod-3
       h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 4, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
-      if '/D_x/' in tf.get_variable_scope().name:
+      if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(audio_lod)), 16000, max_outputs=10, family='D_audio_lod_3')
         tf.summary.scalar('on_amount', on_amount)
     
     # Layer 2
     # [1024, 64] -> [256, 128]
-    with tf.variable_scope('downconv_2'):
+    with tf.variable_scope('do2'):
       on_amount = lod-2
       h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 8, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
-      if '/D_x/' in tf.get_variable_scope().name:
+      if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(audio_lod))), 16000, max_outputs=10, family='D_audio_lod_2')
         tf.summary.scalar('on_amount', on_amount)
 
     # Layer 3
     # [256, 128] -> [64, 256]
-    with tf.variable_scope('downconv_3'):
+    with tf.variable_scope('do3'):
       on_amount = lod-1
       h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 16, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
-      if '/D_x/' in tf.get_variable_scope().name:
+      if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod)))), 16000, max_outputs=10, family='D_audio_lod_1')
         tf.summary.scalar('on_amount', on_amount)
 
     # Layer 4
     # [64, 256] -> [16, 512]
-    with tf.variable_scope('downconv_4'):
+    with tf.variable_scope('do4'):
       on_amount = lod-0
       h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 32, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
-      if '/D_x/' in tf.get_variable_scope().name:
+      if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod))))), 16000, max_outputs=10, family='D_audio_lod_0')
         tf.summary.scalar('on_amount', on_amount)
 
@@ -470,30 +481,37 @@ def WaveGANDiscriminator(
 
   x_code, _ = encode_audio(x, lod, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
   
-  if (context_embedding is not None):
-    with tf.variable_scope('conditional'):
-      # Add conditioning to audio encoding
-      c_code = compress_embedding(context_embedding, embedding_dim)
-      cond_out = add_conditioning(x_code, c_code)
-      output = cond_out
-  else:
-    output = x_code
+  # if (context_embedding is not None):
+  #   with tf.variable_scope('cond'):
+  #     # Add conditioning to audio encoding
+  #     c_code = compress_embedding(context_embedding, embedding_dim)
+  #     cond_out = add_conditioning(x_code, c_code)
+  #     output = cond_out
+  # else:
+    # output = x_code
+  output = x_code
 
   # <-- TODO: Minibatch std deviation layer goes here
 
   # Final residual block
   # [16, 512] -> [16, 512]
-  with tf.variable_scope('final_convs'):
-    output = residual_block(output, filters=cond_out.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
+  with tf.variable_scope('frb'):
+    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
   if (use_extra_uncond_output) and (context_embedding is not None):
-    with tf.variable_scope('final_convs_uncond'):
+    with tf.variable_scope('frb_u'):
       uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
 
   # FC 1
   # [16, 512] -> [512]
   batch_size = tf.shape(x)[0]
-  with tf.variable_scope('fully_connected_1'):
+  with tf.variable_scope('fc1'):
     output = tf.reshape(output, [batch_size, -1]) # Flatten
+
+    # Add conditioning
+    if (context_embedding is not None):
+      c_code = compress_embedding(context_embedding, embedding_dim)
+      output = tf.concat([output, c_code], 1)
+
     output = batchnorm(output)
     output = lrelu(output)
     output = tf.layers.dense(output, dim * 32)
@@ -506,15 +524,16 @@ def WaveGANDiscriminator(
 
   # FC 2
   # [512] -> [1]
-  with tf.variable_scope('fully_connected_2'):
+  with tf.variable_scope('fc2'):
     output = batchnorm(output)
     output = lrelu(output)
     output = tf.layers.dense(output, 1)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_out = batchnorm(uncond_out)
-      uncond_out = lrelu(uncond_out)
-      uncond_out = tf.layers.dense(uncond_out, 1)
+      with tf.variable_scope('fc2_u'):
+        uncond_out = batchnorm(uncond_out)
+        uncond_out = lrelu(uncond_out)
+        uncond_out = tf.layers.dense(uncond_out, 1)
       return [output, uncond_out]
     else:
       return [output]
