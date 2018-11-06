@@ -192,9 +192,6 @@ def train(fps, args):
       D_loss /= 2
     else:
       D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
-
-    # Warmup Conditional Loss
-    # D_warmup_loss = D_loss_real + D_loss_wrong
   elif args.wavegan_loss == 'lsgan':
     # Conditional G Loss
     G_loss = tf.reduce_mean((D_G_z[0] - 1.) ** 2)
@@ -251,9 +248,6 @@ def train(fps, args):
     else:
       D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
 
-    # Warmup Conditional Loss
-    # D_warmup_loss = D_loss_real + D_loss_wrong
-
     with tf.name_scope('D_clip_weights'):
       clip_ops = []
       for var in D_vars:
@@ -292,9 +286,6 @@ def train(fps, args):
     else:
       D_loss = D_loss_real + 0.5 * (D_loss_wrong + D_loss_fake)
 
-    # Warmup Conditional Loss
-    # D_warmup_loss = D_loss_real + D_loss_wrong
-
     # Conditional Gradient Penalty
     alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
     real = x
@@ -305,37 +296,24 @@ def train(fps, args):
       D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_kwargs)[0] # Only want conditional output
     gradients = tf.gradients(D_interp, [interpolates])[0]
     slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    cond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+    gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
 
     # Unconditional Gradient Penalty
-    alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
-    real = tf.concat([x[:args.train_batch_size // 2], wrong_audio[:args.train_batch_size // 2]], 0)
-    fake = G_z
-    differences = fake - real
-    interpolates = real + (alpha * differences)
-    with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
-      D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_kwargs)[1] # Only want unconditional output
-    gradients = tf.gradients(D_interp, [interpolates])[0]
-    slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    uncond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
-
-    # Warmup Gradient Penalty
-    # alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
-    # real = x
-    # fake = wrong_audio
-    # differences = fake - real
-    # interpolates = real + (alpha * differences)
-    # with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
-    #   D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_kwargs)[0] # Only want conditional output
-    # gradients = tf.gradients(D_interp, [interpolates])[0]
-    # slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
-    # warmup_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
-
-    gradient_penalty = (cond_gradient_penalty + uncond_gradient_penalty) / 2
+    if args.use_extra_uncond_loss:
+      alpha = tf.random_uniform(shape=[args.train_batch_size, 1, 1], minval=0., maxval=1.)
+      real = tf.concat([x[:args.train_batch_size // 2], wrong_audio[:args.train_batch_size // 2]], 0)
+      fake = G_z
+      differences = fake - real
+      interpolates = real + (alpha * differences)
+      with tf.name_scope('D_interp'), tf.variable_scope('D', reuse=True):
+        D_interp = WaveGANDiscriminator(interpolates, lod, **args.wavegan_d_kwargs)[1] # Only want unconditional output
+      gradients = tf.gradients(D_interp, [interpolates])[0]
+      slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1, 2]))
+      uncond_gradient_penalty = tf.reduce_mean((slopes - 1.) ** 2.)
+      gradient_penalty = (gradient_penalty + uncond_gradient_penalty) / 2
 
     LAMBDA = 10
     D_loss += LAMBDA * gradient_penalty
-    # D_warmup_loss += LAMBDA * warmup_gradient_penalty
   else:
     raise NotImplementedError()
 
@@ -409,11 +387,11 @@ def train(fps, args):
         learning_rate=5e-5)
   elif args.wavegan_loss == 'wgan-gp':
     G_opt = tf.train.AdamOptimizer(
-        learning_rate=6e-4,
+        learning_rate=5e-4,
         beta1=0.5,
         beta2=0.9)
     D_opt = tf.train.AdamOptimizer(
-        learning_rate=6e-4,
+        learning_rate=5e-4,
         beta1=0.5,
         beta2=0.9)
   else:

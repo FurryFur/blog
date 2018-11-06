@@ -18,7 +18,7 @@ def nn_upsample(inputs, stride=2):
     return output
 
 
-def tconv_upsample(inputs, filters, kernel_size=8, stride=2):
+def tconv_upsample(inputs, filters, kernel_size=4, stride=2):
   '''
   Upsamples an audio clip using transpose convolution upsampling.
   Output is of size 'audio clip length' x 'stride'
@@ -42,7 +42,7 @@ def lrelu(inputs, alpha=0.2):
     return tf.maximum(alpha * inputs, inputs)
   
 
-def to_audio(in_code, pre_activation=lrelu, post_activation=tf.tanh, normalization=lambda x: x):
+def to_audio(in_code, pre_activation=lrelu, normalization=lambda x: x):
   '''
   Converts 2d feature map into an audio clip.
   Usage Note: :param in_code: is expected to be non-activated (linear).
@@ -53,7 +53,7 @@ def to_audio(in_code, pre_activation=lrelu, post_activation=tf.tanh, normalizati
     output = normalization(in_code)
     output = pre_activation(output)
     output = tf.layers.conv1d(output, filters=1, kernel_size=1, strides=1, padding='same')
-    return post_activation(output)
+    return output
 
 def from_audio(inputs, out_feature_maps):
   '''
@@ -78,21 +78,20 @@ def add_conditioning(in_code, cond_embed):
     return h_c_code
 
 
-def up_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=2, activation=lrelu, normalization=lambda x: x, upsample_method='zeros'):
+def up_block(inputs, audio_lod, filters, on_amount, kernel_size=4, stride=2, activation=lrelu, normalization=lambda x: x, upsample_method='zeros'):
   '''
   Up Block
   '''
   with tf.variable_scope('up_block'):
+    skip_connection_audio = nn_upsample(audio_lod, stride)
+
     def skip():
       with tf.variable_scope('skip'):
-        skip_connection_audio = nn_upsample(audio_lod, stride)
         skip_connection_code = tf.zeros([tf.shape(inputs)[0], tf.shape(inputs)[1] * stride, filters], dtype=tf.float32)
         return skip_connection_code, skip_connection_audio
 
     def transition():
       with tf.variable_scope('transition'):
-        skip_connection_audio = nn_upsample(audio_lod, stride)
-
         # Shortcut
         with tf.variable_scope('shortcut'):
           shortcut = nn_upsample(inputs, stride)
@@ -132,21 +131,20 @@ def up_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=2, act
     return code, audio_lod
 
 
-def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=2, activation=lrelu, normalization=lambda x: x):
+def down_block(inputs, audio_lod, filters, on_amount, kernel_size=4, stride=2, activation=lrelu, normalization=lambda x: x):
   '''
   Down Block
   '''
   with tf.variable_scope('down_block'):
     audio_lod = avg_downsample(audio_lod, stride)
+    skip_connection_code = from_audio(audio_lod, filters)
+
     def skip():
       with tf.variable_scope('skip'):
-        skip_connection_code = from_audio(audio_lod, filters)
         return skip_connection_code
 
     def transition():
       with tf.variable_scope('transition'):
-        skip_connection_code = from_audio(audio_lod, filters)
-
         # Shortcut
         with tf.variable_scope('shortcut'):
           shortcut = avg_downsample(inputs, stride)
@@ -177,7 +175,7 @@ def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=2, a
     return code, audio_lod
 
 
-def residual_block(inputs, filters, kernel_size=9, stride=1, padding='same', activation=lrelu, normalization=lambda x: x):
+def residual_block(inputs, filters, kernel_size=4, stride=1, padding='same', activation=lrelu, normalization=lambda x: x):
   with tf.variable_scope('residual_block'):
     shortcut = inputs
     if shortcut.get_shape().as_list()[2] != filters:
@@ -283,7 +281,7 @@ def minibatch_stddev_layer(x, group_size=4):
 def WaveGANGenerator(
     z,
     lod,
-    kernel_len=24,
+    kernel_len=4,
     dim=4,
     use_batchnorm=False,
     upsample='zeros',
@@ -333,8 +331,8 @@ def WaveGANGenerator(
     with tf.variable_scope('upconv_{}'.format(i - 1)):
       on_amount = lod - i + 1
       filters = min(dim * 64, dim * (2 ** (lod_levels - 1)) // (2 ** i))
-      if (i != 0 and context_embedding is not None): # Re-apply conditioning on all later lods
-        h_code = add_conditioning(h_code, c_code)
+      # if (i != 0 and context_embedding is not None): # Re-apply conditioning on all later lods
+      #   h_code = add_conditioning(h_code, c_code)
       h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
       
       # Summary info
@@ -373,7 +371,7 @@ def apply_phaseshuffle(x, rad, pad_type='reflect'):
 
 def encode_audio(x,
     lod,
-    kernel_len=24,
+    kernel_len=4,
     dim=4,
     use_batchnorm=False,
     phaseshuffle_rad=0,
@@ -423,7 +421,7 @@ def encode_audio(x,
 def WaveGANDiscriminator(
     x,
     lod,
-    kernel_len=24,
+    kernel_len=4,
     dim=4,
     use_batchnorm=False,
     phaseshuffle_rad=0,
@@ -437,21 +435,22 @@ def WaveGANDiscriminator(
 
   x_code, _ = encode_audio(x, lod, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
   
-  if (context_embedding is not None):
-    with tf.variable_scope('conditional'):
-      # Add conditioning to audio encoding
-      c_code = compress_embedding(context_embedding, embedding_dim)
-      cond_out = add_conditioning(x_code, c_code)
-      output = cond_out
-  else:
-    output = x_code
+  # if (context_embedding is not None):
+  #   with tf.variable_scope('conditional'):
+  #     # Add conditioning to audio encoding
+  #     c_code = compress_embedding(context_embedding, embedding_dim)
+  #     cond_out = add_conditioning(x_code, c_code)
+  #     output = cond_out
+  # else:
+  #   output = x_code
+  output = x_code
 
   # <-- TODO: Minibatch std deviation layer goes here
 
   # Final residual block
   # [4, 256] -> [4, 256]
   with tf.variable_scope('final_convs'):
-    output = residual_block(output, filters=cond_out.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
+    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
   if (use_extra_uncond_output) and (context_embedding is not None):
     with tf.variable_scope('final_convs_uncond'):
       uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
@@ -461,6 +460,11 @@ def WaveGANDiscriminator(
   batch_size = tf.shape(x)[0]
   with tf.variable_scope('fully_connected_1'):
     output = tf.reshape(output, [batch_size, -1]) # Flatten
+
+    if context_embedding is not None:
+      c_code = compress_embedding(context_embedding, embedding_dim)
+      output = tf.concat([output, c_code], 1)
+
     output = batchnorm(output)
     output = lrelu(output)
     output = tf.layers.dense(output, dim * 64)
