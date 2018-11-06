@@ -402,12 +402,43 @@ def train(fps, args):
       global_step=tf.train.get_or_create_global_step())
   D_train_op = D_opt.minimize(D_loss, var_list=D_vars)
 
-  # Variables for smoothly interpolating between LOD levels
-  steps_at_cur_lod_var = tf.get_variable('steps_at_cur_lod', shape=[], dtype=tf.int32, trainable=False)
-  steps_at_cur_lod_incr_op = steps_at_cur_lod_var.assign(steps_at_cur_lod_var + 1)
+  # Optimizer internal state reset ops
+  reset_G_opt_op = tf.variables_initializer(G_opt.variables())
+  reset_D_opt_op = tf.variables_initializer(D_opt.variables())
 
   def smoothstep(x, mi, mx):
     return mi + (mx-mi)*(lambda t: np.where(t < 0 , 0, np.where( t <= 1 , 3*t**2-2*t**3, 1 ) ) )( x )
+
+  def np_lerp_clip(t, a, b):
+    return a + (b - a) * np.clip(t, 0.0, 1.0)
+
+  def get_lod_at_step(step):
+    return np.piecewise(float(step),
+                        [         step < 4000 , 4000  <= step < 8000,
+                         8000  <= step < 12000, 12000 <= step < 16000,
+                         16000 <= step < 20000, 20000 <= step < 24000,
+                         24000 <= step < 28000, 28000 <= step < 32000,
+                         32000 <= step < 36000, 36000 <= step < 40000,
+                         40000 <= step < 44000, 44000 <= step < 48000,
+                         48000 <= step < 52000, 52000 <= step < 56000,
+                         56000 <= step < 60000, 60000 <= step < 64000,
+                         64000 <= step < 68000, 68000 <= step < 72000,
+                         72000 <= step < 76000, 76000 <= step < 80000,
+                         80000 <= step < 84000, 84000 <= step < 88000,
+                         88000 <= step < 92000, 92000 <= step < 96000],
+                        [0,  lambda x: np_lerp_clip((x - 4000 ) / 4000, 0, 1),
+                         1,  lambda x: np_lerp_clip((x - 12000) / 4000, 1, 2),
+                         2,  lambda x: np_lerp_clip((x - 20000) / 4000, 2, 3),
+                         3,  lambda x: np_lerp_clip((x - 28000) / 4000, 3, 4),
+                         4,  lambda x: np_lerp_clip((x - 36000) / 4000, 4, 5),
+                         5,  lambda x: np_lerp_clip((x - 44000) / 4000, 5, 6),
+                         6,  lambda x: np_lerp_clip((x - 52000) / 4000, 6, 7),
+                         7,  lambda x: np_lerp_clip((x - 60000) / 4000, 7, 8),
+                         8,  lambda x: np_lerp_clip((x - 68000) / 4000, 8, 9),
+                         9,  lambda x: np_lerp_clip((x - 76000) / 4000, 9, 10),
+                         10, lambda x: np_lerp_clip((x - 84000) / 4000, 10, 11),
+                         11, lambda x: np_lerp_clip((x - 92000) / 4000, 11, 12),
+                         12])
 
   # Run training
   with tf.train.MonitoredTrainingSession(
@@ -417,70 +448,35 @@ def train(fps, args):
     # Get the summary writer for writing extra summary statistics
     summary_writer = SummaryWriterCache.get(args.train_dir)
 
-    _lod = 0
+    cur_lod = 0
     while True:
       # Calculate Maximum LOD to train
-      step, steps_at_cur_lod = sess.run([tf.train.get_or_create_global_step(), steps_at_cur_lod_var], feed_dict={lod: _lod})
-      cur_lod = np.piecewise(float(steps_at_cur_lod),
-                            [         steps_at_cur_lod < 4000 , 4000  <= steps_at_cur_lod < 8000,
-                             8000  <= steps_at_cur_lod < 12000, 12000 <= steps_at_cur_lod < 16000,
-                             16000 <= steps_at_cur_lod < 20000, 20000 <= steps_at_cur_lod < 24000,
-                             24000 <= steps_at_cur_lod < 28000, 28000 <= steps_at_cur_lod < 32000,
-                             32000 <= steps_at_cur_lod < 36000, 36000 <= steps_at_cur_lod < 40000,
-                             40000 <= steps_at_cur_lod < 44000, 44000 <= steps_at_cur_lod < 48000,
-                             48000 <= steps_at_cur_lod < 52000, 52000 <= steps_at_cur_lod < 56000,
-                             56000 <= steps_at_cur_lod < 60000, 60000 <= steps_at_cur_lod < 64000,
-                             64000 <= steps_at_cur_lod < 68000, 68000 <= steps_at_cur_lod < 72000,
-                             72000 <= steps_at_cur_lod < 76000, 76000 <= steps_at_cur_lod < 80000,
-                             80000 <= steps_at_cur_lod < 84000, 84000 <= steps_at_cur_lod < 88000,
-                             88000 <= steps_at_cur_lod < 92000, 92000 <= steps_at_cur_lod < 96000],
-                            [0,  lambda x: smoothstep((x - 4000 ) / 4000, 0, 1),
-                             1,  lambda x: smoothstep((x - 12000) / 4000, 1, 2),
-                             2,  lambda x: smoothstep((x - 20000) / 4000, 2, 3),
-                             3,  lambda x: smoothstep((x - 28000) / 4000, 3, 4),
-                             4,  lambda x: smoothstep((x - 36000) / 4000, 4, 5),
-                             5,  lambda x: smoothstep((x - 44000) / 4000, 5, 6),
-                             6,  lambda x: smoothstep((x - 52000) / 4000, 6, 7),
-                             7,  lambda x: smoothstep((x - 60000) / 4000, 7, 8),
-                             8,  lambda x: smoothstep((x - 68000) / 4000, 8, 9),
-                             9,  lambda x: smoothstep((x - 76000) / 4000, 9, 10),
-                             10, lambda x: smoothstep((x - 84000) / 4000, 10, 11),
-                             11, lambda x: smoothstep((x - 92000) / 4000, 11, 12),
-                             12])
-      
-      if cur_lod > 0:
-        # Randomly train on either, a previous LOD, or the current one.
-        random_prev_lod = np.random.randint(math.ceil(cur_lod))
-        _lod = np.random.choice([cur_lod, random_prev_lod]) # 50% probability of training on the current LOD
-      else:
-        _lod = cur_lod
-      
-      # Increment step counter when training on current LOD to smoothly interpolate between LOD levels.
-      if _lod == cur_lod:
-          sess.run(steps_at_cur_lod_incr_op, feed_dict={lod: _lod})
+      step = sess.run(tf.train.get_or_create_global_step(), feed_dict={lod: cur_lod})
+      cur_lod = get_lod_at_step(step)
+      prev_lod = get_lod_at_step(step - 1)
 
+      # Reset optimizer internal state when new layers are introduced
+      if np.floor(cur_lod) != np.floor(prev_lod) or np.ceil(cur_lod) != np.ceil(prev_lod):
+        print("Resetting optimizers' internal states at step {}".format(step))
+        sess.run([reset_G_opt_op, reset_D_opt_op], feed_dict={lod: cur_lod})
 
       # Output current LOD and 'steps at currrent LOD' to tensorboard
-      step = float(sess.run(tf.train.get_or_create_global_step(), feed_dict={lod: _lod}))
+      step = float(sess.run(tf.train.get_or_create_global_step(), feed_dict={lod: cur_lod}))
       lod_summary = tf.Summary(value=[
         tf.Summary.Value(tag="current_lod", simple_value=float(cur_lod)),
       ])
-      steps_at_cur_lod_summary = tf.Summary(value=[
-        tf.Summary.Value(tag="steps_at_cur_lod", simple_value=float(steps_at_cur_lod))
-      ])
       summary_writer.add_summary(lod_summary, step)
-      summary_writer.add_summary(steps_at_cur_lod_summary, step)
 
       # Train discriminator
       for i in xrange(args.wavegan_disc_nupdates):
-        sess.run(D_train_op, feed_dict={lod: _lod})
+        sess.run(D_train_op, feed_dict={lod: cur_lod})
 
         # Enforce Lipschitz constraint for WGAN
         if D_clip_weights is not None:
-          sess.run(D_clip_weights, feed_dict={lod: _lod})
+          sess.run(D_clip_weights, feed_dict={lod: cur_lod})
 
       # Train generator
-      sess.run(G_train_op, feed_dict={lod: _lod})
+      sess.run(G_train_op, feed_dict={lod: cur_lod})
 
 
 """
