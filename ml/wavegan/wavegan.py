@@ -331,7 +331,7 @@ def WaveGANGenerator(
 
   # Pixelwise normalize latent vector
   if use_pixel_norm:
-    h_code = pixel_norm(h_code)
+    h_code = pixel_norm(h_code, axis=1)
 
   # FC and reshape for convolution
   # [512] -> [16, 512]
@@ -541,7 +541,7 @@ def WaveGANDiscriminator(
     output = batchnorm(output)
     output = lrelu(output)
     if use_pixel_norm:
-      output = pixel_norm(output)
+      output = pixel_norm(output, axis=1)
     output = tf.layers.dense(output, dim * 32)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
@@ -549,7 +549,7 @@ def WaveGANDiscriminator(
       uncond_out = batchnorm(uncond_out)
       uncond_out = lrelu(uncond_out)
       if use_pixel_norm:
-        uncond_out = pixel_norm(uncond_out)
+        uncond_out = pixel_norm(uncond_out, axis=1)
       uncond_out = tf.layers.dense(uncond_out, dim * 32)
 
   # FC 2
@@ -558,7 +558,7 @@ def WaveGANDiscriminator(
     output = batchnorm(output)
     output = lrelu(output)
     if use_pixel_norm:
-      output = pixel_norm(output)
+      output = pixel_norm(output, axis=1)
     output = tf.layers.dense(output, 1)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
@@ -566,7 +566,7 @@ def WaveGANDiscriminator(
         uncond_out = batchnorm(uncond_out)
         uncond_out = lrelu(uncond_out)
         if use_pixel_norm:
-          uncond_out = pixel_norm(uncond_out)
+          uncond_out = pixel_norm(uncond_out, axis=1)
         uncond_out = tf.layers.dense(uncond_out, 1)
       return [output, uncond_out]
     else:
