@@ -316,8 +316,8 @@ def WaveGANGenerator(
   # [4, 256] -> [4, 256]
   with tf.variable_scope('layer_0'):
     h_code = residual_block(h_code, filters=dim * 64, kernel_size=kernel_len, normalization=batchnorm)
-    if (context_embedding is not None):
-      h_code = add_conditioning(h_code, c_code)
+    # if (context_embedding is not None):
+    #   h_code = add_conditioning(h_code, c_code)
     audio_lod = to_audio(h_code, normalization=batchnorm)
     # Slightly hacky fix for tf.summary.audio not working with low sample rates
     summary_audio = audio_lod
