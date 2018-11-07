@@ -319,14 +319,21 @@ def WaveGANGenerator(
   else:
     _batchnorm = batchnorm = lambda x: x
 
+  h_code = z
+  if use_pixel_norm:
+    h_code = pixel_norm(h_code, axis=1)
+
   if (context_embedding is not None):
     # Reduce or expand context embedding to be size [embedding_dim]
     c_code = compress_embedding(context_embedding, embedding_dim)
     kl_loss = 0
     h_c_code = lrelu(batchnorm(c_code)) # Apply normalization and activation to c_code before passing it to fully connected layer
-    h_code = tf.concat([z, h_c_code], 1) 
+    if use_pixel_norm:
+      h_c_code = pixel_norm(h_c_code, axis=1)
+    h_code = tf.concat([h_code, h_c_code], 1)
+    if use_pixel_norm:
+      h_code /= 2 # z and c may be drawn from distributions with different scales, after PN and concat divide by 2 to combine
   else:
-    h_code = z
     kl_loss = 0
 
   # Pixelwise normalize latent vector
@@ -532,16 +539,22 @@ def WaveGANDiscriminator(
   batch_size = tf.shape(x)[0]
   with tf.variable_scope('fc1'):
     output = tf.reshape(output, [batch_size, -1]) # Flatten
-
-    # Add conditioning
-    if (context_embedding is not None):
-      c_code = compress_embedding(context_embedding, embedding_dim)
-      output = tf.concat([output, c_code], 1)
-
     output = batchnorm(output)
     output = lrelu(output)
     if use_pixel_norm:
       output = pixel_norm(output, axis=1)
+
+    # Add conditioning
+    if (context_embedding is not None):
+      c_code = compress_embedding(context_embedding, embedding_dim)
+      c_code = batchnorm(c_code)
+      c_code = lrelu(c_code)
+      if use_pixel_norm:
+        c_code = pixel_norm(c_code, axis=1)
+      output = tf.concat([output, c_code], 1)
+      if use_pixel_norm:
+        output /= 2 # z and c may be drawn from distributions with different scales, after PN and concat divide by 2 to combine
+
     output = tf.layers.dense(output, dim * 32)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
