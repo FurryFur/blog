@@ -332,13 +332,9 @@ def WaveGANGenerator(
       h_c_code = pixel_norm(h_c_code, axis=1)
     h_code = tf.concat([h_code, h_c_code], 1)
     if use_pixel_norm:
-      h_code /= 2 # z and c may be drawn from distributions with different scales, after PN and concat divide by 2 to combine
+      h_code = pixel_norm(h_code, axis=1)
   else:
     kl_loss = 0
-
-  # Pixelwise normalize latent vector
-  if use_pixel_norm:
-    h_code = pixel_norm(h_code, axis=1)
 
   # FC and reshape for convolution
   # [512] -> [16, 512]
@@ -553,7 +549,7 @@ def WaveGANDiscriminator(
         c_code = pixel_norm(c_code, axis=1)
       output = tf.concat([output, c_code], 1)
       if use_pixel_norm:
-        output /= 2 # z and c may be drawn from distributions with different scales, after PN and concat divide by 2 to combine
+        output = pixel_norm(output,axis=1)
 
     output = tf.layers.dense(output, dim * 32)
 
