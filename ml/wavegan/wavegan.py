@@ -359,7 +359,7 @@ def WaveGANGenerator(
       filters = min(dim * 64, dim * (2 ** (lod_levels - 1)) // (2 ** i))
       # if (i != 0 and context_embedding is not None): # Re-apply conditioning on all later lods
       #   h_code = add_conditioning(h_code, c_code)
-      h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=normalization, on_amount=on_amount, upsample_method=upsample)
+      h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=_normalization, on_amount=on_amount, upsample_method=upsample)
       
       # Summary info
       tf.summary.scalar('on_amount', on_amount)
