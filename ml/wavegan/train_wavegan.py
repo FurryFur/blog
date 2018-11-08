@@ -809,6 +809,8 @@ if __name__ == '__main__':
       help='Dimensionality multiplier for model of G and D')
   wavegan_args.add_argument('--wavegan_batchnorm', action='store_true', dest='wavegan_batchnorm',
       help='Enable batchnorm')
+  wavegan_args.add_argument('--use_disc_layernorm', action='store_true', dest='use_disc_layernorm',
+      help='Enable layernorm for discriminator (overrides batchnorm in discriminator)')
   wavegan_args.add_argument('--wavegan_disc_nupdates', type=int,
       help='Number of discriminator updates per generator update')
   wavegan_args.add_argument('--wavegan_loss', type=str, choices=['dcgan', 'lsgan', 'wgan', 'wgan-gp'],
@@ -852,6 +854,7 @@ if __name__ == '__main__':
     wavegan_kernel_len=24,
     wavegan_dim=4,
     wavegan_batchnorm=False,
+    use_disc_layernorm=False,
     wavegan_disc_nupdates=5,
     wavegan_loss='wgan-gp',
     wavegan_genr_upsample='zeros',
@@ -889,6 +892,7 @@ if __name__ == '__main__':
       'kernel_len': args.wavegan_kernel_len,
       'dim': args.wavegan_dim,
       'use_batchnorm': args.wavegan_batchnorm,
+      'use_layernorm': args.use_disc_layernorm,
       'phaseshuffle_rad': args.wavegan_disc_phaseshuffle,
       'use_extra_uncond_output': args.use_extra_uncond_loss
   })

@@ -5,6 +5,31 @@ def lerp_clip(a, b, t):
   return a + (b - a) * tf.clip_by_value(t, 0.0, 1.0)
 
 
+def layernorm(inputs):
+  '''
+  Layer normalization from improved wgan training paper
+  [https://github.com/igul222/improved_wgan_training/blob/master/tflib/ops/layernorm.py]
+  '''
+  with tf.variable_scope('layernorm'):
+    shape = inputs.get_shape().as_list()
+    norm_axes = [i for i in range(1, len(shape))] # First dimension is batch dimension, normalize over rest
+    mean, var = tf.nn.moments(inputs, norm_axes, keep_dims=True)
+
+    # Assume the 'neurons' axis is the last of norm_axes. This is the case for fully-connected and BWC conv layers.
+    n_neurons = shape[norm_axes[-1]]
+
+    offset = tf.get_variable('offset', initializer=lambda: tf.zeros(n_neurons, dtype=tf.float32))
+    scale = tf.get_variable('scale', initializer=lambda: tf.ones(n_neurons, dtype=tf.float32))
+
+    # Add broadcasting dims to offset and scale (e.g. BWC conv data)
+    offset = tf.reshape(offset, [1 for i in range(len(norm_axes)-1)] + [-1])
+    scale = tf.reshape(scale, [1 for i in range(len(norm_axes)-1)] + [-1])
+
+    result = tf.nn.batch_normalization(inputs, mean, var, offset, scale, 1e-5)
+
+    return result
+
+
 def nn_upsample(inputs, stride=2):
   '''
   Upsamples an audio clip using nearest neighbor upsampling.
@@ -199,7 +224,7 @@ def residual_block(inputs, filters, kernel_size=4, stride=1, padding='same', act
     return code
 
 
-def compress_embedding(embedding, embed_size):
+def compress_embedding(embedding, embed_size, pre_normalization=lambda x: x):
   """
   Return compressed embedding for discriminator.
   Note that this is a linear transform and no non-linear activation is applied here.
@@ -208,6 +233,7 @@ def compress_embedding(embedding, embed_size):
   returns: [batch_size x embed_size] tensor
   """
   with tf.variable_scope('reduce_embed'):
+    embedding = pre_normalization(embedding)
     embedding = tf.layers.dense(embedding, embed_size)
     return embedding
 
@@ -292,16 +318,16 @@ def WaveGANGenerator(
   lod_levels = 13
 
   if use_batchnorm:
-    batchnorm = lambda x: tf.layers.batch_normalization(x, training=train)
-    _batchnorm = lambda x: tf.contrib.layers.batch_norm(x, is_training=train, updates_collections=None) # Hacky fix for weird tensorflow bug that only happens when using batchnorm in an up_block
+    normalization = lambda x: tf.layers.batch_normalization(x, training=train)
+    _normalization = lambda x: tf.contrib.layers.batch_norm(x, is_training=train, updates_collections=None) # Hacky fix for weird tensorflow bug that only happens when using batchnorm in an up_block
   else:
-    _batchnorm = batchnorm = lambda x: x
+    _normalization = normalization = lambda x: x
 
   if (context_embedding is not None):
     # Reduce or expand context embedding to be size [embedding_dim]
-    c_code = compress_embedding(context_embedding, embedding_dim)
+    c_code = compress_embedding(context_embedding, embedding_dim, pre_normalization=normalization)
     kl_loss = 0
-    h_c_code = lrelu(batchnorm(c_code)) # Apply normalization and activation to c_code before passing it to fully connected layer
+    h_c_code = lrelu(normalization(c_code)) # Apply normalization and activation to c_code before passing it to fully connected layer
     h_code = tf.concat([z, h_c_code], 1) 
   else:
     h_code = z
@@ -315,10 +341,10 @@ def WaveGANGenerator(
 
   # [4, 256] -> [4, 256]
   with tf.variable_scope('layer_0'):
-    h_code = residual_block(h_code, filters=dim * 64, kernel_size=kernel_len, normalization=batchnorm)
+    h_code = residual_block(h_code, filters=dim * 64, kernel_size=kernel_len, normalization=normalization)
     # if (context_embedding is not None):
     #   h_code = add_conditioning(h_code, c_code)
-    audio_lod = to_audio(h_code, normalization=batchnorm)
+    audio_lod = to_audio(h_code, normalization=normalization)
     # Slightly hacky fix for tf.summary.audio not working with low sample rates
     summary_audio = audio_lod
     for _ in range(lod_levels - 1): # 12 upsamples 13 lod levels
@@ -333,7 +359,7 @@ def WaveGANGenerator(
       filters = min(dim * 64, dim * (2 ** (lod_levels - 1)) // (2 ** i))
       # if (i != 0 and context_embedding is not None): # Re-apply conditioning on all later lods
       #   h_code = add_conditioning(h_code, c_code)
-      h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=_batchnorm, on_amount=on_amount, upsample_method=upsample)
+      h_code, audio_lod = up_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=normalization, on_amount=on_amount, upsample_method=upsample)
       
       # Summary info
       tf.summary.scalar('on_amount', on_amount)
@@ -343,7 +369,7 @@ def WaveGANGenerator(
         summary_audio = nn_upsample(summary_audio)
       tf.summary.audio('G_audio', summary_audio, 16000, max_outputs=10, family='G_audio_lod_{}'.format(i))
 
-  # Automatically update batchnorm moving averages every time G is used during training
+  # Automatically update normalization moving averages every time G is used during training
   if train and use_batchnorm:
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     # if len(update_ops) != 10:
@@ -374,14 +400,17 @@ def encode_audio(x,
     kernel_len=4,
     dim=4,
     use_batchnorm=False,
+    use_layernorm=False,
     phaseshuffle_rad=0,
     embedding_dim=128):
   lod_levels = 13
   
-  if use_batchnorm:
-    batchnorm = lambda x: tf.layers.batch_normalization(x, training=True)
+  if use_layernorm:
+    normalization = layernorm
+  elif use_batchnorm:
+    normalization = lambda x: tf.layers.batch_normalization(x, training=True)
   else:
-    batchnorm = lambda x: x
+    normalization = lambda x: x
 
   if phaseshuffle_rad > 0:
     phaseshuffle = lambda x: apply_phaseshuffle(x, phaseshuffle_rad)
@@ -400,7 +429,7 @@ def encode_audio(x,
       with tf.variable_scope('downconv_{}'.format(lod_levels - 1 - i)):
         on_amount = lod - i + 1
         filters = min(dim * 64, dim * (2 ** (lod_levels - 1)) // (2 ** i))
-        h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
+        h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=filters, kernel_size=kernel_len, normalization=normalization, on_amount=on_amount)
 
         # Summary info
         if 'D_x/' in tf.get_default_graph().get_name_scope(): # Only output for a single discriminator (discriminator on real audio clips)
@@ -424,16 +453,19 @@ def WaveGANDiscriminator(
     kernel_len=4,
     dim=4,
     use_batchnorm=False,
+    use_layernorm=False,
     phaseshuffle_rad=0,
     context_embedding=None,
     embedding_dim=128,
     use_extra_uncond_output=False):
-  if use_batchnorm:
-    batchnorm = lambda x: tf.layers.batch_normalization(x, training=True)
+  if use_layernorm:
+    normalization = layernorm
+  elif use_batchnorm:
+    normalization = lambda x: tf.layers.batch_normalization(x, training=True)
   else:
-    batchnorm = lambda x: x
+    normalization = lambda x: x
 
-  x_code, _ = encode_audio(x, lod, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
+  x_code, _ = encode_audio(x, lod, kernel_len, dim, use_batchnorm, use_layernorm, phaseshuffle_rad, embedding_dim)
   
   # if (context_embedding is not None):
   #   with tf.variable_scope('conditional'):
@@ -450,42 +482,48 @@ def WaveGANDiscriminator(
   # Final residual block
   # [4, 256] -> [4, 256]
   with tf.variable_scope('final_convs'):
-    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
+    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=normalization, stride=1, padding='same')
   if (use_extra_uncond_output) and (context_embedding is not None):
     with tf.variable_scope('final_convs_uncond'):
-      uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same')
+      uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=normalization, stride=1, padding='same')
 
   # FC 1
   # [4, 256] -> [256]
   batch_size = tf.shape(x)[0]
   with tf.variable_scope('fully_connected_1'):
     output = tf.reshape(output, [batch_size, -1]) # Flatten
+    output = normalization(output)
 
     if context_embedding is not None:
-      c_code = compress_embedding(context_embedding, embedding_dim)
-      output = tf.concat([output, c_code], 1)
-
-    output = batchnorm(output)
+      with tf.variable_scope('conditioning'):
+        c_code = compress_embedding(context_embedding, embedding_dim, pre_normalization=normalization)
+        c_code = normalization(c_code)
+        output = tf.concat([output, c_code], 1)
+        with tf.variable_scope('rescale'):
+          output = normalization(output) # Rescale after concat
+      
     output = lrelu(output)
     output = tf.layers.dense(output, dim * 64)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_out = tf.reshape(uncond_out, [batch_size, -1]) # Flatten
-      uncond_out = batchnorm(uncond_out)
-      uncond_out = lrelu(uncond_out)
-      uncond_out = tf.layers.dense(uncond_out, dim * 64)
+      with tf.variable_scope('uncond'):
+        uncond_out = tf.reshape(uncond_out, [batch_size, -1]) # Flatten
+        uncond_out = normalization(uncond_out)
+        uncond_out = lrelu(uncond_out)
+        uncond_out = tf.layers.dense(uncond_out, dim * 64)
 
   # FC 2
   # [256] -> [1]
   with tf.variable_scope('fully_connected_2'):
-    output = batchnorm(output)
+    output = normalization(output)
     output = lrelu(output)
     output = tf.layers.dense(output, 1)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_out = batchnorm(uncond_out)
-      uncond_out = lrelu(uncond_out)
-      uncond_out = tf.layers.dense(uncond_out, 1)
+      with tf.variable_scope('uncond'):
+        uncond_out = normalization(uncond_out)
+        uncond_out = lrelu(uncond_out)
+        uncond_out = tf.layers.dense(uncond_out, 1)
       return [output, uncond_out]
     else:
       return [output]
