@@ -6,7 +6,9 @@ python train_wavegan.py train .\train ^
 --wavegan_genr_upsample nn ^
 --train_batch_size 50 ^
 --wavegan_disc_nupdates 1 ^
+--train_save_secs 900 ^
 --use_pixel_norm ^
+--use_disc_layernorm ^
 --train_summary_secs 15
 
 REM --use_extra_uncond_loss ^

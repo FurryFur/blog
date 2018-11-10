@@ -397,10 +397,10 @@ def train(fps, args):
   # Create (recommended) optimizer
   if args.wavegan_loss == 'dcgan':
     G_opt = tf.train.AdamOptimizer(
-        learning_rate=0.0002,
+        learning_rate=2e-4,
         beta1=0.5)
     D_opt = tf.train.AdamOptimizer(
-        learning_rate=0.000002,
+        learning_rate=2e-4,
         beta1=0.5)
   elif args.wavegan_loss == 'lsgan':
     G_opt = tf.train.RMSPropOptimizer(
@@ -444,16 +444,16 @@ def train(fps, args):
 
   def get_lod_at_step(step):
     return np.piecewise(float(step),
-                        [          step < 30000 , 30000  <= step < 60000,
-                         60000  <= step < 90000 , 90000  <= step < 120000,
-                         120000 <= step < 150000, 150000 <= step < 180000,
-                         180000 <= step < 210000, 210000 <= step < 240000,
-                         240000 <= step < 270000, 270000 <= step < 300000],
-                        [0, lambda x: np_lerp_clip((x - 30000 ) / 30000, 0, 1),
-                         1, lambda x: np_lerp_clip((x - 90000 ) / 30000, 1, 2),
-                         2, lambda x: np_lerp_clip((x - 150000) / 30000, 2, 3),
-                         3, lambda x: np_lerp_clip((x - 210000) / 30000, 3, 4),
-                         4, lambda x: np_lerp_clip((x - 270000) / 30000, 4, 5),
+                        [         step < 10000, 10000 <= step < 20000,
+                         20000 <= step < 30000, 30000 <= step < 40000,
+                         40000 <= step < 50000, 50000 <= step < 60000,
+                         60000 <= step < 70000, 70000 <= step < 80000,
+                         80000 <= step < 90000, 90000 <= step < 100000],
+                        [0, lambda x: np_lerp_clip((x - 10000) / 10000, 0, 1),
+                         1, lambda x: np_lerp_clip((x - 30000) / 10000, 1, 2),
+                         2, lambda x: np_lerp_clip((x - 50000) / 10000, 2, 3),
+                         3, lambda x: np_lerp_clip((x - 70000) / 10000, 3, 4),
+                         4, lambda x: np_lerp_clip((x - 90000) / 10000, 4, 5),
                          5])
 
   def my_filter_callable(datum, tensor):
@@ -840,6 +840,8 @@ if __name__ == '__main__':
       help='Enable batchnorm')
   wavegan_args.add_argument('--use_pixel_norm', action='store_true', dest='use_pixel_norm',
       help='Enable pixelwise normalization')
+  wavegan_args.add_argument('--use_disc_layernorm', action='store_true', dest='use_disc_layernorm',
+      help='Enable layernorm for discriminator (overrides batchnorm in discriminator)')
   wavegan_args.add_argument('--wavegan_disc_nupdates', type=int,
       help='Number of discriminator updates per generator update')
   wavegan_args.add_argument('--wavegan_loss', type=str, choices=['dcgan', 'lsgan', 'wgan', 'wgan-gp'],
@@ -884,6 +886,7 @@ if __name__ == '__main__':
     wavegan_dim=16,
     wavegan_batchnorm=False,
     use_pixel_norm=False,
+    use_disc_layernrom=False,
     wavegan_disc_nupdates=5,
     wavegan_loss='wgan-gp',
     wavegan_genr_upsample='zeros',
@@ -922,7 +925,7 @@ if __name__ == '__main__':
       'kernel_len': args.wavegan_kernel_len,
       'dim': args.wavegan_dim,
       'use_batchnorm': args.wavegan_batchnorm,
-      'use_pixel_norm': args.use_pixel_norm,
+      'use_layernorm': args.use_disc_layernorm,
       'phaseshuffle_rad': args.wavegan_disc_phaseshuffle,
       'use_extra_uncond_output': args.use_extra_uncond_loss
   })

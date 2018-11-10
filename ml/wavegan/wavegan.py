@@ -10,6 +10,31 @@ def pixel_norm(x, epsilon=1e-8, axis=2):
     return x * tf.rsqrt(tf.reduce_mean(tf.square(x), axis=axis, keepdims=True) + epsilon)
 
 
+def layernorm(inputs):
+  '''
+  Layer normalization from improved wgan training paper
+  [https://github.com/igul222/improved_wgan_training/blob/master/tflib/ops/layernorm.py]
+  '''
+  with tf.variable_scope('layernorm'):
+    shape = inputs.get_shape().as_list()
+    norm_axes = [i for i in range(1, len(shape))] # First dimension is batch dimension, normalize over rest
+    mean, var = tf.nn.moments(inputs, norm_axes, keep_dims=True)
+
+    # Assume the 'neurons' axis is the last of norm_axes. This is the case for fully-connected and BWC conv layers.
+    n_neurons = shape[norm_axes[-1]]
+
+    offset = tf.get_variable('offset', initializer=lambda: tf.zeros(n_neurons, dtype=tf.float32))
+    scale = tf.get_variable('scale', initializer=lambda: tf.ones(n_neurons, dtype=tf.float32))
+
+    # Add broadcasting dims to offset and scale (e.g. BWC conv data)
+    offset = tf.reshape(offset, [1 for i in range(len(norm_axes)-1)] + [-1])
+    scale = tf.reshape(scale, [1 for i in range(len(norm_axes)-1)] + [-1])
+
+    result = tf.nn.batch_normalization(inputs, mean, var, offset, scale, 1e-5)
+    return result
+
+
+
 def nn_upsample(inputs, stride=4):
   '''
   Upsamples an audio clip using nearest neighbor upsampling.
@@ -145,7 +170,7 @@ def up_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, act
     return code, audio_lod
 
 
-def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, activation=lrelu, normalization=lambda x: x, use_pixel_norm=True):
+def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, activation=lrelu, normalization=lambda x: x):
   '''
   Down Block
   '''
@@ -171,14 +196,10 @@ def down_block(inputs, audio_lod, filters, on_amount, kernel_size=9, stride=4, a
         with tf.variable_scope('co0'):
           code = normalization(code)
           code = activation(code)  # Pre-Activation
-          if use_pixel_norm:
-            code = pixel_norm(code)
           code = tf.layers.conv1d(code, inputs.get_shape().as_list()[2], kernel_size, strides=1, padding='same')
         with tf.variable_scope('co1'):
           code = normalization(code)
           code = activation(code)  # Pre-Activation
-          if use_pixel_norm:
-            code = pixel_norm(code)
           code = tf.layers.conv1d(code, filters, kernel_size, strides=stride, padding='same')
 
         # Add shortcut connection
@@ -421,7 +442,6 @@ def encode_audio(x,
     kernel_len=24,
     dim=16,
     use_batchnorm=False,
-    use_pixel_norm=True,
     phaseshuffle_rad=0,
     embedding_dim=128):
   if use_batchnorm:
@@ -443,7 +463,7 @@ def encode_audio(x,
     # [16384, 1] -> [4096, 32] (h_code)
     with tf.variable_scope('do0'):
       on_amount = lod-4
-      h_code, audio_lod = down_block(from_audio(x, dim), audio_lod=x, filters=dim * 2, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount, use_pixel_norm=use_pixel_norm)
+      h_code, audio_lod = down_block(from_audio(x, dim), audio_lod=x, filters=dim * 2, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
       if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(audio_lod), 16000, max_outputs=10, family='D_audio_lod_4')
         tf.summary.scalar('on_amount', on_amount)
@@ -453,7 +473,7 @@ def encode_audio(x,
     # [4096, 32] -> [1024, 64]
     with tf.variable_scope('do1'):
       on_amount = lod-3
-      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 4, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount, use_pixel_norm=use_pixel_norm)
+      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 4, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
       if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(audio_lod)), 16000, max_outputs=10, family='D_audio_lod_3')
         tf.summary.scalar('on_amount', on_amount)
@@ -462,7 +482,7 @@ def encode_audio(x,
     # [1024, 64] -> [256, 128]
     with tf.variable_scope('do2'):
       on_amount = lod-2
-      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 8, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount, use_pixel_norm=use_pixel_norm)
+      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 8, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
       if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(audio_lod))), 16000, max_outputs=10, family='D_audio_lod_2')
         tf.summary.scalar('on_amount', on_amount)
@@ -471,7 +491,7 @@ def encode_audio(x,
     # [256, 128] -> [64, 256]
     with tf.variable_scope('do3'):
       on_amount = lod-1
-      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 16, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount, use_pixel_norm=use_pixel_norm)
+      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 16, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
       if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod)))), 16000, max_outputs=10, family='D_audio_lod_1')
         tf.summary.scalar('on_amount', on_amount)
@@ -480,7 +500,7 @@ def encode_audio(x,
     # [64, 256] -> [16, 512]
     with tf.variable_scope('do4'):
       on_amount = lod-0
-      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 32, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount, use_pixel_norm=use_pixel_norm)
+      h_code, audio_lod = down_block(h_code, audio_lod=audio_lod, filters=dim * 32, kernel_size=kernel_len, normalization=batchnorm, on_amount=on_amount)
       if 'D_x/' in tf.get_default_graph().get_name_scope():
         tf.summary.audio('audio_downsample', nn_upsample(nn_upsample(nn_upsample(nn_upsample(nn_upsample(audio_lod))))), 16000, max_outputs=10, family='D_audio_lod_0')
         tf.summary.scalar('on_amount', on_amount)
@@ -498,15 +518,17 @@ def WaveGANDiscriminator(
     kernel_len=24,
     dim=16,
     use_batchnorm=False,
-    use_pixel_norm=True,
+    use_layernorm=False,
     phaseshuffle_rad=0,
     context_embedding=None,
     embedding_dim=128,
     use_extra_uncond_output=False):
-  if use_batchnorm:
-    batchnorm = lambda x: tf.layers.batch_normalization(x, training=True)
+  if use_layernorm:
+    normalization = layernorm
+  elif use_batchnorm:
+    normalization = lambda x: tf.layers.batch_normalization(x, training=True)
   else:
-    batchnorm = lambda x: x
+    normalization = lambda x: x
 
   x_code, _ = encode_audio(x, lod, kernel_len, dim, use_batchnorm, phaseshuffle_rad, embedding_dim)
   
@@ -525,57 +547,47 @@ def WaveGANDiscriminator(
   # Final residual block
   # [16, 512] -> [16, 512]
   with tf.variable_scope('frb'):
-    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same', use_pixel_norm=use_pixel_norm)
+    output = residual_block(output, filters=output.get_shape().as_list()[2], kernel_size=kernel_len, normalization=normalization, stride=1, padding='same', use_pixel_norm=False)
   if (use_extra_uncond_output) and (context_embedding is not None):
     with tf.variable_scope('frb_u'):
-      uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=batchnorm, stride=1, padding='same', use_pixel_norm=use_pixel_norm)
+      uncond_out = residual_block(x_code, filters=x_code.get_shape().as_list()[2], kernel_size=kernel_len, normalization=normalization, stride=1, padding='same', use_pixel_norm=False)
 
   # FC 1
   # [16, 512] -> [512]
   batch_size = tf.shape(x)[0]
   with tf.variable_scope('fc1'):
     output = tf.reshape(output, [batch_size, -1]) # Flatten
-    output = batchnorm(output)
+    output = normalization(output)
     output = lrelu(output)
-    if use_pixel_norm:
-      output = pixel_norm(output, axis=1)
 
     # Add conditioning
     if (context_embedding is not None):
-      c_code = compress_embedding(context_embedding, embedding_dim)
-      c_code = batchnorm(c_code)
-      c_code = lrelu(c_code)
-      if use_pixel_norm:
-        c_code = pixel_norm(c_code, axis=1)
-      output = tf.concat([output, c_code], 1)
-      if use_pixel_norm:
-        output = pixel_norm(output,axis=1)
+      with tf.variable_scope('c'):
+        c_code = compress_embedding(context_embedding, embedding_dim)
+        c_code = normalization(c_code)
+        c_code = lrelu(c_code)
+        output = tf.concat([output, c_code], 1)
 
     output = tf.layers.dense(output, dim * 32)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
-      uncond_out = tf.reshape(uncond_out, [batch_size, -1]) # Flatten
-      uncond_out = batchnorm(uncond_out)
-      uncond_out = lrelu(uncond_out)
-      if use_pixel_norm:
-        uncond_out = pixel_norm(uncond_out, axis=1)
-      uncond_out = tf.layers.dense(uncond_out, dim * 32)
+      with tf.variable_scope('fc1_u'):
+        uncond_out = tf.reshape(uncond_out, [batch_size, -1]) # Flatten
+        uncond_out = normalization(uncond_out)
+        uncond_out = lrelu(uncond_out)
+        uncond_out = tf.layers.dense(uncond_out, dim * 32)
 
   # FC 2
   # [512] -> [1]
   with tf.variable_scope('fc2'):
-    output = batchnorm(output)
+    output = normalization(output)
     output = lrelu(output)
-    if use_pixel_norm:
-      output = pixel_norm(output, axis=1)
     output = tf.layers.dense(output, 1)
 
     if (use_extra_uncond_output) and (context_embedding is not None):
       with tf.variable_scope('fc2_u'):
-        uncond_out = batchnorm(uncond_out)
+        uncond_out = normalization(uncond_out)
         uncond_out = lrelu(uncond_out)
-        if use_pixel_norm:
-          uncond_out = pixel_norm(uncond_out, axis=1)
         uncond_out = tf.layers.dense(uncond_out, 1)
       return [output, uncond_out]
     else:
