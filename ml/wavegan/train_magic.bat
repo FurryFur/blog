@@ -2,8 +2,8 @@ python train_wavegan.py train .\train ^
 --data_dir .\data\Final_Datasets\Magic ^
 --data_first_window ^
 --use_extra_uncond_loss ^
---wavegan_kernel_len 8 ^
---wavegan_genr_upsample zeros ^
+--wavegan_kernel_len 9 ^
+--wavegan_genr_upsample nn ^
 --train_batch_size 50 ^
 --wavegan_disc_nupdates 1 ^
 --train_save_secs 900 ^
